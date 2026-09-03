@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: nexusguard_db
+    environment:
+      POSTGRES_USER: nexususer
+      POSTGRES_PASSWORD: nexuspass
+      POSTGRES_DB: nexusguard
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  bot:
+    build: .
+    container_name: nexusguard_bot
+    depends_on:
+      - postgres
+    env_file:
+      - .env
+    restart: unless-stopped
+
+volumes:
+  pgdata:
