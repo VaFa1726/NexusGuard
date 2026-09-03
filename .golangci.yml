@@ -1,34 +1,46 @@
+# golangci-lint v2 configuration
+version: "2"
+
 run:
   timeout: 5m
-  go: "1.25"
 
 linters:
+  default: none
   enable:
-    - errcheck       # Checks for unchecked errors
-    - gosimple       # Suggests code simplifications
+    # Correctness
+    - errcheck       # Checks unchecked errors
     - govet          # Reports suspicious constructs
-    - ineffassign    # Detects unused variable assignments
     - staticcheck    # Comprehensive static analysis
-    - unused         # Checks for unused code
-    - gofmt          # Enforces formatting
+    - ineffassign    # Detects unused assignments
+    - gosimple       # Simplification suggestions
+
+    # Security
+    - gosec          # Security vulnerability checks
+
+    # Style & Formatting
+    - gofmt          # Enforces Go formatting
     - goimports      # Checks import ordering
-    - gocritic       # Provides opinionated checks
-    - gosec          # Security checks
-    - misspell       # Finds commonly misspelled words
-    - prealloc       # Suggests pre-allocation for slices
-    - revive         # Fast, configurable linter
-    - wrapcheck      # Checks that errors are wrapped with context
+    - misspell       # Finds misspelled words
+    - revive         # Fast, configurable linter (replaces golint)
+
+    # Bugs
+    - bodyclose      # Checks HTTP response body is closed
+    - noctx          # Finds HTTP requests without context
 
 linters-settings:
   gosec:
     excludes:
-      - G104  # Unhandled errors (already covered by errcheck)
+      - G104  # Unhandled errors (covered by errcheck)
   goimports:
     local-prefixes: github.com/nexusguard/bot
+  revive:
+    rules:
+      - name: exported
+        disabled: false
 
 issues:
   exclude-rules:
-    # Relax some rules in test files
+    # Relax rules in test files
     - path: "_test\\.go"
       linters:
         - gosec
