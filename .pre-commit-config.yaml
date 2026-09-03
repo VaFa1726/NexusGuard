@@ -1,0 +1,49 @@
+repos:
+  # ─── General File Hygiene ──────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+      - id: detect-private-key   # Block accidental private key commits
+
+  # ─── Secret Detection ─────────────────────────────────────────────────────
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  # ─── Go-specific hooks ────────────────────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: go-fmt
+        name: "Go: Format (gofmt)"
+        entry: gofmt -l -w
+        language: system
+        types: [go]
+
+      - id: go-vet
+        name: "Go: Vet"
+        entry: bash -c '/home/vafa/.local/go/bin/go vet ./...'
+        language: system
+        pass_filenames: false
+
+      - id: go-mod-tidy
+        name: "Go: Mod Tidy"
+        entry: bash -c '/home/vafa/.local/go/bin/go mod tidy'
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: go-build
+        name: "Go: Build Check"
+        entry: bash -c '/home/vafa/.local/go/bin/go build ./...'
+        language: system
+        pass_filenames: false

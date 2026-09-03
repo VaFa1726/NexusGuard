@@ -5,12 +5,15 @@ import (
 	"os"
 )
 
+// Config holds all application configuration loaded from environment variables.
 type Config struct {
 	TelegramToken string
 	DatabaseURL   string
 	ProxyURL      string
 }
 
+// LoadConfig reads configuration from environment variables.
+// It returns an error if any required variable is missing.
 func LoadConfig() (*Config, error) {
 	token := os.Getenv("TELEGRAM_TOKEN")
 	if token == "" {
@@ -22,7 +25,7 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("DATABASE_URL is not set")
 	}
 
-	// PROXY_URL is optional
+	// PROXY_URL is optional — leave empty on unrestricted networks
 	proxyURL := os.Getenv("PROXY_URL")
 
 	return &Config{

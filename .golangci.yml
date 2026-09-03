@@ -1,0 +1,35 @@
+run:
+  timeout: 5m
+  go: "1.25"
+
+linters:
+  enable:
+    - errcheck       # Checks for unchecked errors
+    - gosimple       # Suggests code simplifications
+    - govet          # Reports suspicious constructs
+    - ineffassign    # Detects unused variable assignments
+    - staticcheck    # Comprehensive static analysis
+    - unused         # Checks for unused code
+    - gofmt          # Enforces formatting
+    - goimports      # Checks import ordering
+    - gocritic       # Provides opinionated checks
+    - gosec          # Security checks
+    - misspell       # Finds commonly misspelled words
+    - prealloc       # Suggests pre-allocation for slices
+    - revive         # Fast, configurable linter
+    - wrapcheck      # Checks that errors are wrapped with context
+
+linters-settings:
+  gosec:
+    excludes:
+      - G104  # Unhandled errors (already covered by errcheck)
+  goimports:
+    local-prefixes: github.com/nexusguard/bot
+
+issues:
+  exclude-rules:
+    # Relax some rules in test files
+    - path: "_test\\.go"
+      linters:
+        - gosec
+        - errcheck
