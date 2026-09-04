@@ -10,19 +10,6 @@ import (
 	tele "gopkg.in/telebot.v3"
 )
 
-// ─── Auto-delete helpers ──────────────────────────────────────────────────────
-
-// autoDeleteAfter deletes a message after the given duration.
-// Runs in a goroutine — non-blocking.
-func autoDeleteAfter(bot *tele.Bot, msg *tele.Message, delay time.Duration) {
-	go func() {
-		time.Sleep(delay)
-		if err := bot.Delete(msg); err != nil {
-			slog.Debug("auto-delete failed (msg may already be gone)", "error", err)
-		}
-	}()
-}
-
 // deleteCommandMsg immediately deletes the admin's command message so
 // other members never see it.
 func deleteCommandMsg(c tele.Context) {
@@ -32,30 +19,6 @@ func deleteCommandMsg(c tele.Context) {
 	if err := c.Bot().Delete(c.Message()); err != nil {
 		slog.Debug("failed to delete command msg", "error", err)
 	}
-}
-
-// sendEphemeral sends a message to the chat and auto-deletes it after 20s.
-// Also deletes the triggering command message immediately.
-func sendEphemeral(c tele.Context, text string, opts ...interface{}) error {
-	deleteCommandMsg(c)
-	opts = append(opts, tele.ModeMarkdown)
-	msg, err := c.Bot().Send(c.Chat(), text, opts...)
-	if err != nil {
-		return err
-	}
-	autoDeleteAfter(c.Bot(), msg, 20*time.Second)
-	return nil
-}
-
-// sendEphemeralWithMenu sends a message with inline keyboard and auto-deletes after 20s.
-func sendEphemeralWithMenu(c tele.Context, text string, menu *tele.ReplyMarkup) error {
-	deleteCommandMsg(c)
-	msg, err := c.Bot().Send(c.Chat(), text, menu, tele.ModeMarkdown)
-	if err != nil {
-		return err
-	}
-	autoDeleteAfter(c.Bot(), msg, 20*time.Second)
-	return nil
 }
 
 // ─── Private Chat Authentication Gate ────────────────────────────────────────

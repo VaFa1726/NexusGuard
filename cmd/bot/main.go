@@ -82,6 +82,14 @@ func main() {
 	}
 	slog.Info("Telegram bot connected", "username", bot.Me.Username, "id", bot.Me.ID)
 
+	// ── Set Bot Commands Menu ────────────────────────────────────────────────
+	err = bot.SetCommands([]tele.Command{
+		{Text: "start", Description: "🚀 Main Menu"},
+	})
+	if err != nil {
+		slog.Warn("Failed to set bot commands menu", "error", err)
+	}
+
 	// ── Dependency Injection ─────────────────────────────────────────────────
 	groupRepo := postgres.NewGroupRepository(pool)
 	userRepo := postgres.NewUserRepository(pool)

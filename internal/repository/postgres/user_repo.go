@@ -84,7 +84,9 @@ func (r *UserRepository) IncrementWarn(ctx context.Context, memberID int64, reas
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
 
 	var warnCount int
 	err = tx.QueryRow(ctx,

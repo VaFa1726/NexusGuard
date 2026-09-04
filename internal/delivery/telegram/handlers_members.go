@@ -52,7 +52,7 @@ func (h *Handler) onBanned(c tele.Context) error {
 	if err != nil || len(members) == 0 {
 		msg, _ := c.Bot().Send(c.Chat(), "✅ No banned users found.", tele.ModeMarkdown)
 		if msg != nil {
-			autoDeleteAfter(c.Bot(), msg, 20*time.Second)
+			h.autoDeleteAfter(c.Bot(), msg, 20*time.Second)
 		}
 		return nil
 	}
@@ -60,25 +60,25 @@ func (h *Handler) onBanned(c tele.Context) error {
 	text, menu := buildBannedList(members, group.TelegramID)
 	msg, err := c.Bot().Send(c.Chat(), text, menu, tele.ModeMarkdown)
 	if err == nil {
-		autoDeleteAfter(c.Bot(), msg, 30*time.Second)
+		h.autoDeleteAfter(c.Bot(), msg, 30*time.Second)
 	}
 	return nil
 }
 
 func buildBannedList(members []postgres.MemberInfo, groupTelegramID int64, extraRows ...tele.Row) (string, *tele.ReplyMarkup) {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("🚫 *Banned Users* (%d users)\n\n", len(members)))
+	fmt.Fprintf(&sb, "🚫 *Banned Users* (%d users)\n\n", len(members))
 
 	menu := &tele.ReplyMarkup{}
 	var rows []tele.Row
 
 	for i, m := range members {
 		if i >= 20 {
-			sb.WriteString(fmt.Sprintf("_...and %d more users_\n", len(members)-20))
+			fmt.Fprintf(&sb, "_...and %d more users_\n", len(members)-20)
 			break
 		}
 		name := memberDisplayName(m)
-		sb.WriteString(fmt.Sprintf("%d. 🚫 %s\n", i+1, name))
+		fmt.Fprintf(&sb, "%d. 🚫 %s\n", i+1, name)
 
 		rows = append(rows, menu.Row(
 			menu.Data(
@@ -114,7 +114,7 @@ func (h *Handler) onWarned(c tele.Context) error {
 	if err != nil || len(members) == 0 {
 		msg, _ := c.Bot().Send(c.Chat(), "✅ No users with warnings found.", tele.ModeMarkdown)
 		if msg != nil {
-			autoDeleteAfter(c.Bot(), msg, 20*time.Second)
+			h.autoDeleteAfter(c.Bot(), msg, 20*time.Second)
 		}
 		return nil
 	}
@@ -122,21 +122,21 @@ func (h *Handler) onWarned(c tele.Context) error {
 	text, menu := buildWarnedList(members, group.TelegramID, group.MaxWarns)
 	msg, err := c.Bot().Send(c.Chat(), text, menu, tele.ModeMarkdown)
 	if err == nil {
-		autoDeleteAfter(c.Bot(), msg, 30*time.Second)
+		h.autoDeleteAfter(c.Bot(), msg, 30*time.Second)
 	}
 	return nil
 }
 
 func buildWarnedList(members []postgres.MemberInfo, groupTelegramID int64, maxWarns int, extraRows ...tele.Row) (string, *tele.ReplyMarkup) {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("⚠️ *Warned Users* (Max warnings: %d)\n\n", maxWarns))
+	fmt.Fprintf(&sb, "⚠️ *Warned Users* (Max warnings: %d)\n\n", maxWarns)
 
 	menu := &tele.ReplyMarkup{}
 	var rows []tele.Row
 
 	for i, m := range members {
 		if i >= 20 {
-			sb.WriteString(fmt.Sprintf("_...and %d more users_\n", len(members)-20))
+			fmt.Fprintf(&sb, "_...and %d more users_\n", len(members)-20)
 			break
 		}
 		name := memberDisplayName(m)
@@ -148,7 +148,7 @@ func buildWarnedList(members []postgres.MemberInfo, groupTelegramID int64, maxWa
 		if m.IsBanned {
 			status = " 🚫"
 		}
-		sb.WriteString(fmt.Sprintf("%d. %s %s%s `[%d/%d]`\n", i+1, warnBar, name, status, m.WarnCount, maxWarns))
+		fmt.Fprintf(&sb, "%d. %s %s%s `[%d/%d]`\n", i+1, warnBar, name, status, m.WarnCount, maxWarns)
 
 		rows = append(rows, menu.Row(
 			menu.Data(
@@ -196,7 +196,7 @@ func (h *Handler) onMuted(c tele.Context) error {
 	if err != nil || len(members) == 0 {
 		msg, _ := c.Bot().Send(c.Chat(), "✅ No muted users found.", tele.ModeMarkdown)
 		if msg != nil {
-			autoDeleteAfter(c.Bot(), msg, 20*time.Second)
+			h.autoDeleteAfter(c.Bot(), msg, 20*time.Second)
 		}
 		return nil
 	}
@@ -204,25 +204,25 @@ func (h *Handler) onMuted(c tele.Context) error {
 	text, menu := buildMutedList(members, group.TelegramID)
 	msg, err := c.Bot().Send(c.Chat(), text, menu, tele.ModeMarkdown)
 	if err == nil {
-		autoDeleteAfter(c.Bot(), msg, 30*time.Second)
+		h.autoDeleteAfter(c.Bot(), msg, 30*time.Second)
 	}
 	return nil
 }
 
 func buildMutedList(members []postgres.MemberInfo, groupTelegramID int64, extraRows ...tele.Row) (string, *tele.ReplyMarkup) {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("🔇 *Muted Users* (%d users)\n\n", len(members)))
+	fmt.Fprintf(&sb, "🔇 *Muted Users* (%d users)\n\n", len(members))
 
 	menu := &tele.ReplyMarkup{}
 	var rows []tele.Row
 
 	for i, m := range members {
 		if i >= 20 {
-			sb.WriteString(fmt.Sprintf("_...and %d more users_\n", len(members)-20))
+			fmt.Fprintf(&sb, "_...and %d more users_\n", len(members)-20)
 			break
 		}
 		name := memberDisplayName(m)
-		sb.WriteString(fmt.Sprintf("%d. 🔇 %s\n", i+1, name))
+		fmt.Fprintf(&sb, "%d. 🔇 %s\n", i+1, name)
 
 		rows = append(rows, menu.Row(
 			menu.Data(
@@ -258,13 +258,13 @@ func (h *Handler) onMembers(c tele.Context) error {
 	if err != nil || len(members) == 0 {
 		msg, _ := c.Bot().Send(c.Chat(), "📋 No members recorded in the database yet.\n_Members are registered once they send a message._", tele.ModeMarkdown)
 		if msg != nil {
-			autoDeleteAfter(c.Bot(), msg, 20*time.Second)
+			h.autoDeleteAfter(c.Bot(), msg, 20*time.Second)
 		}
 		return nil
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("👥 *Tracked Members* (%d users, ranked by XP)\n\n", len(members)))
+	fmt.Fprintf(&sb, "👥 *Tracked Members* (%d users, ranked by XP)\n\n", len(members))
 
 	for i, m := range members {
 		name := memberDisplayName(m)
@@ -281,13 +281,13 @@ func (h *Handler) onMembers(c tele.Context) error {
 		if flags != "" {
 			flags = " " + flags
 		}
-		sb.WriteString(fmt.Sprintf("%d. %s%s\n", i+1, name, flags))
+		fmt.Fprintf(&sb, "%d. %s%s\n", i+1, name, flags)
 	}
 	sb.WriteString("\n_This message auto-deletes in 30s_ 🧹")
 
 	msg, err := c.Bot().Send(c.Chat(), sb.String(), tele.ModeMarkdown)
 	if err == nil {
-		autoDeleteAfter(c.Bot(), msg, 30*time.Second)
+		h.autoDeleteAfter(c.Bot(), msg, 30*time.Second)
 	}
 	return nil
 }
@@ -312,7 +312,7 @@ func (h *Handler) onUnmute(c tele.Context) error {
 	if replied == nil || replied.Sender == nil {
 		msg, _ := c.Bot().Send(c.Chat(), "⚠️ Please reply to the muted user's message.", tele.ModeMarkdown)
 		if msg != nil {
-			autoDeleteAfter(c.Bot(), msg, 10*time.Second)
+			h.autoDeleteAfter(c.Bot(), msg, 10*time.Second)
 		}
 		return nil
 	}
@@ -335,7 +335,7 @@ func (h *Handler) onUnmute(c tele.Context) error {
 	msg, _ := c.Bot().Send(c.Chat(),
 		fmt.Sprintf("🔊 *%s* has been unmuted.", targetName), tele.ModeMarkdown)
 	if msg != nil {
-		autoDeleteAfter(c.Bot(), msg, 20*time.Second)
+		h.autoDeleteAfter(c.Bot(), msg, 20*time.Second)
 	}
 	return nil
 }
@@ -360,7 +360,7 @@ func (h *Handler) onUnban(c tele.Context) error {
 	if replied == nil || replied.Sender == nil {
 		msg, _ := c.Bot().Send(c.Chat(), "⚠️ Please reply to the banned user's message.", tele.ModeMarkdown)
 		if msg != nil {
-			autoDeleteAfter(c.Bot(), msg, 10*time.Second)
+			h.autoDeleteAfter(c.Bot(), msg, 10*time.Second)
 		}
 		return nil
 	}
@@ -381,7 +381,7 @@ func (h *Handler) onUnban(c tele.Context) error {
 	msg, _ := c.Bot().Send(c.Chat(),
 		fmt.Sprintf("🔓 *%s* has been unbanned.", targetName), tele.ModeMarkdown)
 	if msg != nil {
-		autoDeleteAfter(c.Bot(), msg, 20*time.Second)
+		h.autoDeleteAfter(c.Bot(), msg, 20*time.Second)
 	}
 	return nil
 }

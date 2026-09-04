@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nexusguard/bot/internal/domain"
@@ -18,14 +19,33 @@ type Handler struct {
 	svc       *usecase.GroupService
 	adminSvc  *usecase.AdminService
 	adminRepo *postgres.AdminRepository
+
+	delMu     sync.Mutex
+	delTimers map[string]*time.Timer
 }
 
 func NewHandler(svc *usecase.GroupService, adminSvc *usecase.AdminService, adminRepo *postgres.AdminRepository) *Handler {
-	return &Handler{svc: svc, adminSvc: adminSvc, adminRepo: adminRepo}
+	return &Handler{
+		svc:       svc,
+		adminSvc:  adminSvc,
+		adminRepo: adminRepo,
+		delTimers: make(map[string]*time.Timer),
+	}
 }
 
 // RegisterAll attaches all handlers to the bot.
 func (h *Handler) RegisterAll(b *tele.Bot) {
+	// Global middleware to reset menu timers on interaction
+	b.Use(func(next tele.HandlerFunc) tele.HandlerFunc {
+		return func(c tele.Context) error {
+			if c.Callback() != nil && c.Message() != nil {
+				// Reset the menu's auto-delete timer to 30 seconds upon any interaction
+				h.autoDeleteAfter(c.Bot(), c.Message(), 30*time.Second)
+			}
+			return next(c)
+		}
+	})
+
 	// ── Private chat ──────────────────────────────────────────────────────
 	b.Handle("/start", h.onStart)
 	b.Handle("/ping", h.onPing)
@@ -145,7 +165,7 @@ func (h *Handler) onStart(c tele.Context) error {
 		menu.Inline(menu.Row(menu.URL("➕ Add Bot to My Group", addURL)))
 		msg, err := c.Bot().Send(c.Sender(), text, menu, tele.ModeMarkdown)
 		if err == nil {
-			autoDeleteAfter(c.Bot(), msg, 30*time.Second)
+			h.autoDeleteAfter(c.Bot(), msg, 30*time.Second)
 		}
 		return err
 	}
@@ -167,7 +187,7 @@ func (h *Handler) onStart(c tele.Context) error {
 	menu := mainMenu(botUsername)
 	msg, err := c.Bot().Send(c.Sender(), text, menu, tele.ModeMarkdown)
 	if err == nil {
-		autoDeleteAfter(c.Bot(), msg, 20*time.Second)
+		h.autoDeleteAfter(c.Bot(), msg, 20*time.Second)
 	}
 	return err
 }
@@ -498,7 +518,7 @@ func (h *Handler) onUserJoined(c tele.Context) error {
 		}
 		sentMsg, err := c.Bot().Send(c.Chat(), msg, tele.ModeMarkdown)
 		if err == nil {
-			autoDeleteAfter(c.Bot(), sentMsg, 30*time.Second)
+			h.autoDeleteAfter(c.Bot(), sentMsg, 30*time.Second)
 		}
 	}
 	return nil
@@ -575,7 +595,7 @@ func (h *Handler) onText(c tele.Context) error {
 		_ = c.Delete()
 		msg, _ := c.Bot().Send(c.Chat(), fmt.Sprintf("⛔ Message deleted: _%s_", reason), tele.ModeMarkdown)
 		if msg != nil {
-			autoDeleteAfter(c.Bot(), msg, 5*time.Second)
+			h.autoDeleteAfter(c.Bot(), msg, 5*time.Second)
 		}
 		return nil
 	}
@@ -607,7 +627,7 @@ func (h *Handler) onWarn(c tele.Context) error {
 	if replied == nil {
 		msg, _ := c.Bot().Send(c.Chat(), "⚠️ Reply to a user message and type `/warn`.", tele.ModeMarkdown)
 		if msg != nil {
-			autoDeleteAfter(c.Bot(), msg, 10*time.Second)
+			h.autoDeleteAfter(c.Bot(), msg, 10*time.Second)
 		}
 		return nil
 	}
@@ -683,7 +703,7 @@ func (h *Handler) onWarn(c tele.Context) error {
 
 	msg, _ := c.Bot().Send(c.Chat(), responseText, tele.ModeMarkdown)
 	if msg != nil {
-		autoDeleteAfter(c.Bot(), msg, 20*time.Second)
+		h.autoDeleteAfter(c.Bot(), msg, 20*time.Second)
 	}
 	return nil
 }
@@ -730,7 +750,7 @@ func (h *Handler) onSettings(c tele.Context) error {
 			menu, tele.ModeMarkdown,
 		)
 		if err == nil && msg != nil {
-			autoDeleteAfter(c.Bot(), msg, 15*time.Second)
+			h.autoDeleteAfter(c.Bot(), msg, 15*time.Second)
 		}
 		return nil
 	}
@@ -957,7 +977,7 @@ func (h *Handler) onGroupMembers(c tele.Context) error {
 
 	members, err := h.svc.ListAllMembers(ctx, group.ID, 25)
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("👥 *Known Members: %s*\n\n", group.Title))
+	fmt.Fprintf(&sb, "👥 *Known Members: %s*\n\n", group.Title)
 	if err != nil || len(members) == 0 {
 		sb.WriteString("No members recorded yet.\n_Members are recorded when they send messages._")
 	} else {
@@ -973,7 +993,7 @@ func (h *Handler) onGroupMembers(c tele.Context) error {
 			if m.WarnCount > 0 {
 				flags += fmt.Sprintf(" ⚠️%d", m.WarnCount)
 			}
-			sb.WriteString(fmt.Sprintf("%d. %s %s\n", i+1, name, flags))
+			fmt.Fprintf(&sb, "%d. %s %s\n", i+1, name, flags)
 		}
 	}
 
@@ -1005,7 +1025,7 @@ func (h *Handler) onGroupAdmins(c tele.Context) error {
 
 	admins, err := h.adminSvc.ListAdmins(ctx, group.ID)
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("🛡️ *NexusGuard Admins: %s*\n\n", group.Title))
+	fmt.Fprintf(&sb, "🛡️ *NexusGuard Admins: %s*\n\n", group.Title)
 	if err != nil || len(admins) == 0 {
 		sb.WriteString("No admins registered for this group yet.")
 	} else {
@@ -1022,7 +1042,7 @@ func (h *Handler) onGroupAdmins(c tele.Context) error {
 			} else {
 				name = fmt.Sprintf("user_%d", a.TelegramID)
 			}
-			sb.WriteString(fmt.Sprintf("%s %s — `%s`\n", emoji, name, a.Role))
+			fmt.Fprintf(&sb, "%s %s — `%s`\n", emoji, name, a.Role)
 		}
 	}
 
@@ -1052,7 +1072,7 @@ func (h *Handler) onGroupWarned(c tele.Context) error {
 		return answerUnauthorizedCallback(c)
 	}
 
-	members, err := h.svc.ListWarnedMembers(ctx, group.ID)
+	members, _ := h.svc.ListWarnedMembers(ctx, group.ID)
 	data := buildDashboardData(group.TelegramID, c.Sender().ID)
 	markup := &tele.ReplyMarkup{}
 	backRow := markup.Row(markup.Data("🔙 Back to Group Panel", btnManageGroup.Unique, data))
@@ -1080,7 +1100,7 @@ func (h *Handler) onGroupMuted(c tele.Context) error {
 		return answerUnauthorizedCallback(c)
 	}
 
-	members, err := h.svc.ListMutedMembers(ctx, group.ID)
+	members, _ := h.svc.ListMutedMembers(ctx, group.ID)
 	data := buildDashboardData(group.TelegramID, c.Sender().ID)
 	markup := &tele.ReplyMarkup{}
 	backRow := markup.Row(markup.Data("🔙 Back to Group Panel", btnManageGroup.Unique, data))
@@ -1108,7 +1128,7 @@ func (h *Handler) onGroupBanned(c tele.Context) error {
 		return answerUnauthorizedCallback(c)
 	}
 
-	members, err := h.svc.ListBannedMembers(ctx, group.ID)
+	members, _ := h.svc.ListBannedMembers(ctx, group.ID)
 	data := buildDashboardData(group.TelegramID, c.Sender().ID)
 	markup := &tele.ReplyMarkup{}
 	backRow := markup.Row(markup.Data("🔙 Back to Group Panel", btnManageGroup.Unique, data))
@@ -1142,7 +1162,7 @@ func (h *Handler) onAddAdmin(c tele.Context) error {
 	if errMsg != "" {
 		msg, _ := c.Bot().Send(c.Chat(), errMsg, tele.ModeMarkdown)
 		if msg != nil {
-			autoDeleteAfter(c.Bot(), msg, 10*time.Second)
+			h.autoDeleteAfter(c.Bot(), msg, 10*time.Second)
 		}
 		return nil
 	}
@@ -1158,7 +1178,7 @@ func (h *Handler) onAddAdmin(c tele.Context) error {
 	msg, _ := c.Bot().Send(c.Chat(),
 		fmt.Sprintf("🛡️ *%s* has been registered as *Admin*.", name), tele.ModeMarkdown)
 	if msg != nil {
-		autoDeleteAfter(c.Bot(), msg, 20*time.Second)
+		h.autoDeleteAfter(c.Bot(), msg, 20*time.Second)
 	}
 	return nil
 }
@@ -1186,7 +1206,7 @@ func (h *Handler) onAddMod(c tele.Context) error {
 	if errMsg != "" {
 		msg, _ := c.Bot().Send(c.Chat(), errMsg, tele.ModeMarkdown)
 		if msg != nil {
-			autoDeleteAfter(c.Bot(), msg, 10*time.Second)
+			h.autoDeleteAfter(c.Bot(), msg, 10*time.Second)
 		}
 		return nil
 	}
@@ -1202,7 +1222,7 @@ func (h *Handler) onAddMod(c tele.Context) error {
 	msg, _ := c.Bot().Send(c.Chat(),
 		fmt.Sprintf("🔧 *%s* has been registered as *Moderator*.", name), tele.ModeMarkdown)
 	if msg != nil {
-		autoDeleteAfter(c.Bot(), msg, 20*time.Second)
+		h.autoDeleteAfter(c.Bot(), msg, 20*time.Second)
 	}
 	return nil
 }
@@ -1230,7 +1250,7 @@ func (h *Handler) onRemoveRole(c tele.Context) error {
 	if errMsg != "" {
 		msg, _ := c.Bot().Send(c.Chat(), errMsg, tele.ModeMarkdown)
 		if msg != nil {
-			autoDeleteAfter(c.Bot(), msg, 10*time.Second)
+			h.autoDeleteAfter(c.Bot(), msg, 10*time.Second)
 		}
 		return nil
 	}
@@ -1246,7 +1266,7 @@ func (h *Handler) onRemoveRole(c tele.Context) error {
 	msg, _ := c.Bot().Send(c.Chat(),
 		fmt.Sprintf("🗑️ Permissions removed for *%s*.", name), tele.ModeMarkdown)
 	if msg != nil {
-		autoDeleteAfter(c.Bot(), msg, 20*time.Second)
+		h.autoDeleteAfter(c.Bot(), msg, 20*time.Second)
 	}
 	return nil
 }
@@ -1274,7 +1294,7 @@ func (h *Handler) onListAdmins(c tele.Context) error {
 	if err != nil || len(admins) == 0 {
 		msg, _ := c.Bot().Send(c.Chat(), "📋 No admins or moderators configured.", tele.ModeMarkdown)
 		if msg != nil {
-			autoDeleteAfter(c.Bot(), msg, 15*time.Second)
+			h.autoDeleteAfter(c.Bot(), msg, 15*time.Second)
 		}
 		return nil
 	}
@@ -1295,13 +1315,13 @@ func (h *Handler) onListAdmins(c tele.Context) error {
 		} else {
 			name = fmt.Sprintf("user_%d", a.TelegramID)
 		}
-		sb.WriteString(fmt.Sprintf("%s %s — `%s`\n", emoji, name, a.Role))
+		fmt.Fprintf(&sb, "%s %s — `%s`\n", emoji, name, a.Role)
 	}
 	sb.WriteString("\n_This message will self-destruct in 20 seconds_ 🧹")
 
 	msg, _ := c.Bot().Send(c.Chat(), sb.String(), tele.ModeMarkdown)
 	if msg != nil {
-		autoDeleteAfter(c.Bot(), msg, 20*time.Second)
+		h.autoDeleteAfter(c.Bot(), msg, 20*time.Second)
 	}
 	return nil
 }
@@ -1312,4 +1332,27 @@ func (h *Handler) extractTarget(c tele.Context) (*tele.User, string) {
 		return c.Message().ReplyTo.Sender, ""
 	}
 	return nil, "⚠️ Please reply to the target user's message."
+}
+
+// autoDeleteAfter deletes a message after the given duration.
+// Safely resets the timer if called again for the same message.
+func (h *Handler) autoDeleteAfter(bot *tele.Bot, msg *tele.Message, delay time.Duration) {
+	if msg == nil || bot == nil {
+		return
+	}
+	key := fmt.Sprintf("%d:%d", msg.Chat.ID, msg.ID)
+
+	h.delMu.Lock()
+	defer h.delMu.Unlock()
+
+	if t, exists := h.delTimers[key]; exists {
+		t.Stop()
+	}
+
+	h.delTimers[key] = time.AfterFunc(delay, func() {
+		h.delMu.Lock()
+		delete(h.delTimers, key)
+		h.delMu.Unlock()
+		_ = bot.Delete(msg)
+	})
 }

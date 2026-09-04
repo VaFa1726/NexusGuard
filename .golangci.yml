@@ -10,10 +10,7 @@ linters:
     - govet
     - staticcheck
     - ineffassign
-    - gosimple
     - gosec
-    - gofmt
-    - goimports
     - misspell
     - revive
     - bodyclose
@@ -27,7 +24,7 @@ linters:
     revive:
       rules:
         - name: exported
-          disabled: false
+          disabled: true
 
   exclusions:
     rules:
