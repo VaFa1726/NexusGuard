@@ -23,8 +23,7 @@ linters:
     gosec:
       excludes:
         - G104
-    goimports:
-      local-prefixes: github.com/nexusguard/bot
+
     revive:
       rules:
         - name: exported
