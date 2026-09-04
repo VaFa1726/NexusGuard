@@ -8,7 +8,6 @@ import (
 	"github.com/nexusguard/bot/internal/domain"
 )
 
-
 type UserRepository struct {
 	pool *pgxpool.Pool
 }
@@ -138,7 +137,6 @@ func (r *UserRepository) SetBanStatus(ctx context.Context, groupDBID, targetTele
 	return err
 }
 
-
 // ─── Member Management ────────────────────────────────────────────────────────
 
 // MemberInfo holds user info alongside their group membership data.
@@ -253,7 +251,11 @@ func (r *UserRepository) UnbanUser(ctx context.Context, groupDBID, targetTelegra
 	return err
 }
 
-func scanMemberInfoRows(rows interface{ Next() bool; Scan(...interface{}) error; Err() error }) ([]MemberInfo, error) {
+func scanMemberInfoRows(rows interface {
+	Next() bool
+	Scan(...interface{}) error
+	Err() error
+}) ([]MemberInfo, error) {
 	var members []MemberInfo
 	for rows.Next() {
 		var m MemberInfo
@@ -265,3 +267,15 @@ func scanMemberInfoRows(rows interface{ Next() bool; Scan(...interface{}) error;
 	return members, rows.Err()
 }
 
+// SoftDeleteMember marks a user's group membership as deleted.
+// Used when a user leaves or is removed from the group.
+func (r *UserRepository) SoftDeleteMember(ctx context.Context, groupDBID, telegramID int64) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE group_members gm SET deleted_at = NOW(), updated_at = NOW()
+		 FROM users u
+		 WHERE gm.user_id = u.id AND gm.group_id = $1 AND u.telegram_id = $2
+		   AND gm.deleted_at IS NULL`,
+		groupDBID, telegramID,
+	)
+	return err
+}

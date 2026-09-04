@@ -61,7 +61,7 @@ func main() {
 
 	// ── Telegram Bot ─────────────────────────────────────────────────────────
 	pref := tele.Settings{
-		Token:  cfg.TelegramToken,
+		Token: cfg.TelegramToken,
 		Poller: &tele.LongPoller{
 			Timeout: 10 * time.Second,
 			// Must explicitly allow my_chat_member to detect when bot is added to groups
@@ -84,13 +84,13 @@ func main() {
 
 	// ── Dependency Injection ─────────────────────────────────────────────────
 	groupRepo := postgres.NewGroupRepository(pool)
-	userRepo  := postgres.NewUserRepository(pool)
+	userRepo := postgres.NewUserRepository(pool)
 	adminRepo := postgres.NewAdminRepository(pool)
 
-	groupSvc  := usecase.NewGroupService(groupRepo, userRepo)
-	adminSvc  := usecase.NewAdminService(adminRepo, groupRepo)
+	groupSvc := usecase.NewGroupService(groupRepo, userRepo)
+	adminSvc := usecase.NewAdminService(adminRepo, groupRepo)
 
-	handler   := telegram.NewHandler(groupSvc, adminSvc, adminRepo)
+	handler := telegram.NewHandler(groupSvc, adminSvc, adminRepo)
 
 	// ── Register Handlers ─────────────────────────────────────────────────────
 	handler.RegisterAll(bot)

@@ -120,3 +120,12 @@ func (r *GroupRepository) ListManagedGroups(ctx context.Context, telegramID int6
 	}
 	return groups, rows.Err()
 }
+
+// SetGroupActive updates the is_active flag for a group.
+func (r *GroupRepository) SetGroupActive(ctx context.Context, groupDBID int64, active bool) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE groups SET is_active = $1, updated_at = NOW() WHERE id = $2`,
+		active, groupDBID,
+	)
+	return err
+}

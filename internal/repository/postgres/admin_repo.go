@@ -19,13 +19,13 @@ const (
 
 // BotAdmin represents a user who has been granted a bot role in a group.
 type BotAdmin struct {
-	ID          int64     `db:"id"`
-	GroupID     int64     `db:"group_id"`      // internal DB group id
-	TelegramID  int64     `db:"telegram_id"`   // user's telegram id
-	Username    string    `db:"username"`
-	Role        BotRole   `db:"role"`
-	GrantedBy   int64     `db:"granted_by"`    // telegram id of granter
-	CreatedAt   time.Time `db:"created_at"`
+	ID         int64     `db:"id"`
+	GroupID    int64     `db:"group_id"`    // internal DB group id
+	TelegramID int64     `db:"telegram_id"` // user's telegram id
+	Username   string    `db:"username"`
+	Role       BotRole   `db:"role"`
+	GrantedBy  int64     `db:"granted_by"` // telegram id of granter
+	CreatedAt  time.Time `db:"created_at"`
 }
 
 type AdminRepository struct {
@@ -133,7 +133,6 @@ func (r *AdminRepository) IsOwnerOfAnyGroup(ctx context.Context, telegramID int6
 	return err == nil && exists
 }
 
-
 // GetRoleInAnyGroup returns the highest role a user holds across all groups.
 // Returns empty string if the user has no roles.
 func (r *AdminRepository) GetRoleInAnyGroup(ctx context.Context, telegramID int64) BotRole {
@@ -155,4 +154,14 @@ func (r *AdminRepository) GetRoleInAnyGroup(ctx context.Context, telegramID int6
 		return ""
 	}
 	return role
+}
+
+// PurgeUserFromGroup removes ALL roles (including owner) for a user in a group.
+// Used when a user leaves or is removed from the group — complete cleanup.
+func (r *AdminRepository) PurgeUserFromGroup(ctx context.Context, groupDBID, telegramID int64) error {
+	_, err := r.pool.Exec(ctx,
+		`DELETE FROM group_bot_admins WHERE group_id = $1 AND telegram_id = $2`,
+		groupDBID, telegramID,
+	)
+	return err
 }

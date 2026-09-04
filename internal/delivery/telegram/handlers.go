@@ -27,48 +27,49 @@ func NewHandler(svc *usecase.GroupService, adminSvc *usecase.AdminService, admin
 // RegisterAll attaches all handlers to the bot.
 func (h *Handler) RegisterAll(b *tele.Bot) {
 	// ── Private chat ──────────────────────────────────────────────────────
-	b.Handle("/start",    h.onStart)
-	b.Handle("/ping",     h.onPing)
+	b.Handle("/start", h.onStart)
+	b.Handle("/ping", h.onPing)
 	b.Handle("/mygroups", h.onMyGroups)
-	b.Handle("/help",     h.onHelp)
+	b.Handle("/help", h.onHelp)
 
 	// ── Private inline buttons ────────────────────────────────────────────
-	b.Handle(&btnStatus,   h.onBtnStatus)
-	b.Handle(&btnProfile,  h.onBtnProfile)
-	b.Handle(&btnAddBot,   h.onBtnAddBot)
+	b.Handle(&btnStatus, h.onBtnStatus)
+	b.Handle(&btnProfile, h.onBtnProfile)
+	b.Handle(&btnAddBot, h.onBtnAddBot)
 	b.Handle(&btnMyGroups, h.onBtnMyGroups)
-	b.Handle(&btnHelp,     h.onBtnHelp)
-	b.Handle(&btnBack,     h.onBack)
+	b.Handle(&btnHelp, h.onBtnHelp)
+	b.Handle(&btnBack, h.onBack)
 
 	// ── Private group dashboard buttons ───────────────────────────────────
-	b.Handle(&btnManageGroup,   h.onManageGroup)
+	b.Handle(&btnManageGroup, h.onManageGroup)
 	b.Handle(&btnGroupSettings, h.onGroupSettings)
-	b.Handle(&btnGroupMembers,  h.onGroupMembers)
-	b.Handle(&btnGroupAdmins,   h.onGroupAdmins)
-	b.Handle(&btnGroupWarned,   h.onGroupWarned)
-	b.Handle(&btnGroupMuted,    h.onGroupMuted)
-	b.Handle(&btnGroupBanned,   h.onGroupBanned)
+	b.Handle(&btnGroupMembers, h.onGroupMembers)
+	b.Handle(&btnGroupAdmins, h.onGroupAdmins)
+	b.Handle(&btnGroupWarned, h.onGroupWarned)
+	b.Handle(&btnGroupMuted, h.onGroupMuted)
+	b.Handle(&btnGroupBanned, h.onGroupBanned)
 
 	// ── Group moderation (role-protected) ─────────────────────────────────
-	b.Handle("/warn",        h.onWarn)        // Moderator+
-	b.Handle("/settings",    h.onSettings)    // In group: notifies to use PV
-	b.Handle("/addadmin",    h.onAddAdmin)    // Owner only
-	b.Handle("/addmod",      h.onAddMod)      // Admin+
-	b.Handle("/removeadmin", h.onRemoveRole)  // Owner only
-	b.Handle("/admins",      h.onListAdmins)  // Moderator+
+	b.Handle("/warn", h.onWarn)              // Moderator+
+	b.Handle("/settings", h.onSettings)      // In group: notifies to use PV
+	b.Handle("/addadmin", h.onAddAdmin)      // Owner only
+	b.Handle("/addmod", h.onAddMod)          // Admin+
+	b.Handle("/removeadmin", h.onRemoveRole) // Owner only
+	b.Handle("/admins", h.onListAdmins)      // Moderator+
 
 	// ── Member management (role-protected) ────────────────────────────────
-	h.RegisterMemberHandlers(b)              // /banned /warned /muted /members /unmute /unban
+	h.RegisterMemberHandlers(b) // /banned /warned /muted /members /unmute /unban
 
 	// ── Settings toggle callbacks ─────────────────────────────────────────
-	b.Handle(&btnToggleLinks,     h.onToggleLinks)
+	b.Handle(&btnToggleLinks, h.onToggleLinks)
 	b.Handle(&btnToggleProfanity, h.onToggleProfanity)
-	b.Handle(&btnToggleWelcome,   h.onToggleWelcome)
-	b.Handle(&btnSettingsBack,    h.onSettingsBack)
+	b.Handle(&btnToggleWelcome, h.onToggleWelcome)
+	b.Handle(&btnSettingsBack, h.onSettingsBack)
 
 	// ── Group events ──────────────────────────────────────────────────────
-	b.Handle(tele.OnUserJoined,   h.onUserJoined)
-	b.Handle(tele.OnText,         h.onText)
+	b.Handle(tele.OnUserJoined, h.onUserJoined)
+	b.Handle(tele.OnUserLeft, h.onUserLeft)
+	b.Handle(tele.OnText, h.onText)
 	b.Handle(tele.OnMyChatMember, h.onMyChatMember)
 }
 
@@ -170,7 +171,6 @@ func (h *Handler) onStart(c tele.Context) error {
 	}
 	return err
 }
-
 
 func mainMenu(botUsername string) *tele.ReplyMarkup {
 	menu := &tele.ReplyMarkup{}
@@ -285,7 +285,7 @@ func (h *Handler) onBtnMyGroups(c tele.Context) error {
 }
 
 func (h *Handler) showMyGroups(c tele.Context) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	// Only show groups where this user is the Owner (not just any admin/moderator)
@@ -305,21 +305,48 @@ func (h *Handler) showMyGroups(c tele.Context) error {
 		return c.Edit(text, menu, tele.ModeMarkdown)
 	}
 
-	text := fmt.Sprintf("🏘️ *My Groups* (%d groups)\n\nSelect a group to manage members, admins, and security settings:", len(groups))
+	// ── Verify each group via Telegram API — deactivate stale ones ──
+	var activeGroups []domain.Group
+	for _, g := range groups {
+		chat, err := c.Bot().ChatByID(g.TelegramID)
+		if err != nil || chat == nil {
+			// Bot is no longer in this group — mark inactive
+			slog.Info("Group no longer accessible, marking inactive",
+				"group_id", g.TelegramID, "title", g.Title)
+			_ = h.svc.SetGroupActive(ctx, g.ID, false)
+			continue
+		}
+		// Update title if it changed
+		if chat.Title != "" && chat.Title != g.Title {
+			g.Title = chat.Title
+		}
+		g.IsActive = true
+		activeGroups = append(activeGroups, g)
+	}
+
+	if len(activeGroups) == 0 {
+		text := "🏘️ *My Groups*\n\n" +
+			"No active groups found. Your previous groups are no longer accessible.\n" +
+			"Add the bot to a new group to get started."
+		menu := &tele.ReplyMarkup{}
+		menu.Inline(
+			menu.Row(menu.URL("➕ Add to Group", addURL)),
+			menu.Row(menu.Data("🔙 Back to Menu", btnBack.Unique)),
+		)
+		return c.Edit(text, menu, tele.ModeMarkdown)
+	}
+
+	text := fmt.Sprintf("🏘️ *My Groups* (%d groups)\n\nSelect a group to manage members, admins, and security settings:", len(activeGroups))
 	menu := &tele.ReplyMarkup{}
 	var rows []tele.Row
 
 	callerID := c.Sender().ID
-	for _, g := range groups {
-		status := "🟢"
-		if !g.IsActive {
-			status = "🔴"
-		}
+	for _, g := range activeGroups {
 		title := g.Title
 		if title == "" {
 			title = fmt.Sprintf("Group %d", g.TelegramID)
 		}
-		btnLabel := fmt.Sprintf("%s 🛡️ %s", status, truncate(title, 22))
+		btnLabel := fmt.Sprintf("🟢 🛡️ %s", truncate(title, 22))
 		// Embed callerID in callback data: "<groupTelegramID>:<callerTelegramID>"
 		// This ensures only the person who opened the menu can interact with it
 		data := fmt.Sprintf("%d:%d", g.TelegramID, callerID)
@@ -366,7 +393,6 @@ func (h *Handler) onMyGroups(c tele.Context) error {
 	}
 	return h.showMyGroups(c)
 }
-
 
 func backMenu() *tele.ReplyMarkup {
 	menu := &tele.ReplyMarkup{}
@@ -478,6 +504,44 @@ func (h *Handler) onUserJoined(c tele.Context) error {
 	return nil
 }
 
+// ─── onUserLeft — User left or was removed ───────────────────────────────────
+func (h *Handler) onUserLeft(c tele.Context) error {
+	chat := c.Chat()
+	left := c.Message().UserLeft
+	if left == nil || left.IsBot {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	group, err := h.svc.GetGroup(ctx, chat.ID)
+	if err != nil {
+		return nil // Group not registered — nothing to clean up
+	}
+
+	// Remove ALL bot roles (owner/admin/moderator) for this user in this group
+	if err := h.adminRepo.PurgeUserFromGroup(ctx, group.ID, left.ID); err != nil {
+		slog.Error("Failed to purge user roles on leave",
+			"user_id", left.ID, "group_id", group.ID, "error", err)
+	}
+
+	// Soft-delete membership record
+	if err := h.svc.SoftDeleteMember(ctx, group.ID, left.ID); err != nil {
+		slog.Error("Failed to soft-delete member on leave",
+			"user_id", left.ID, "group_id", group.ID, "error", err)
+	}
+
+	slog.Info("User left/removed — roles and membership purged",
+		"user_id", left.ID,
+		"username", left.Username,
+		"chat_id", chat.ID,
+		"group_title", chat.Title,
+	)
+
+	return nil
+}
+
 // ─── onText — Handle text messages ───────────────────────────────────────────
 func (h *Handler) onText(c tele.Context) error {
 	// ── Private Chat Text ──────────────────────────────────────────
@@ -542,7 +606,9 @@ func (h *Handler) onWarn(c tele.Context) error {
 	replied := c.Message().ReplyTo
 	if replied == nil {
 		msg, _ := c.Bot().Send(c.Chat(), "⚠️ Reply to a user message and type `/warn`.", tele.ModeMarkdown)
-		if msg != nil { autoDeleteAfter(c.Bot(), msg, 10*time.Second) }
+		if msg != nil {
+			autoDeleteAfter(c.Bot(), msg, 10*time.Second)
+		}
 		return nil
 	}
 
@@ -671,7 +737,6 @@ func (h *Handler) onSettings(c tele.Context) error {
 	return h.showMyGroups(c)
 }
 
-
 func settingsText(g *domain.Group) string {
 	on := func(b bool) string {
 		if b {
@@ -750,7 +815,6 @@ func (h *Handler) toggleSetting(c tele.Context, toggle func(*domain.Group)) erro
 func (h *Handler) onSettingsBack(c tele.Context) error {
 	return h.onManageGroup(c)
 }
-
 
 // ─── Secure callback data helpers ────────────────────────────────────────────
 
@@ -900,9 +964,15 @@ func (h *Handler) onGroupMembers(c tele.Context) error {
 		for i, m := range members {
 			name := memberDisplayName(m)
 			flags := ""
-			if m.IsMuted { flags += "🔇" }
-			if m.IsBanned { flags += "🚫" }
-			if m.WarnCount > 0 { flags += fmt.Sprintf(" ⚠️%d", m.WarnCount) }
+			if m.IsMuted {
+				flags += "🔇"
+			}
+			if m.IsBanned {
+				flags += "🚫"
+			}
+			if m.WarnCount > 0 {
+				flags += fmt.Sprintf(" ⚠️%d", m.WarnCount)
+			}
 			sb.WriteString(fmt.Sprintf("%d. %s %s\n", i+1, name, flags))
 		}
 	}
@@ -1048,7 +1118,6 @@ func (h *Handler) onGroupBanned(c tele.Context) error {
 	return c.Edit(text, menu, tele.ModeMarkdown)
 }
 
-
 // ─── /addadmin ───────────────────────────────────────────────────────────────
 func (h *Handler) onAddAdmin(c tele.Context) error {
 	if c.Chat().Type == tele.ChatPrivate {
@@ -1060,7 +1129,9 @@ func (h *Handler) onAddAdmin(c tele.Context) error {
 	defer cancel()
 
 	group, err := h.svc.GetGroup(ctx, c.Chat().ID)
-	if err != nil { return nil }
+	if err != nil {
+		return nil
+	}
 
 	// Only Owner can add admins
 	if !h.requireOwnerOnly(c, group.ID) {
@@ -1070,7 +1141,9 @@ func (h *Handler) onAddAdmin(c tele.Context) error {
 	target, errMsg := h.extractTarget(c)
 	if errMsg != "" {
 		msg, _ := c.Bot().Send(c.Chat(), errMsg, tele.ModeMarkdown)
-		if msg != nil { autoDeleteAfter(c.Bot(), msg, 10*time.Second) }
+		if msg != nil {
+			autoDeleteAfter(c.Bot(), msg, 10*time.Second)
+		}
 		return nil
 	}
 
@@ -1079,10 +1152,14 @@ func (h *Handler) onAddAdmin(c tele.Context) error {
 	}
 
 	name := target.FirstName
-	if target.Username != "" { name = "@" + target.Username }
+	if target.Username != "" {
+		name = "@" + target.Username
+	}
 	msg, _ := c.Bot().Send(c.Chat(),
 		fmt.Sprintf("🛡️ *%s* has been registered as *Admin*.", name), tele.ModeMarkdown)
-	if msg != nil { autoDeleteAfter(c.Bot(), msg, 20*time.Second) }
+	if msg != nil {
+		autoDeleteAfter(c.Bot(), msg, 20*time.Second)
+	}
 	return nil
 }
 
@@ -1097,7 +1174,9 @@ func (h *Handler) onAddMod(c tele.Context) error {
 	defer cancel()
 
 	group, err := h.svc.GetGroup(ctx, c.Chat().ID)
-	if err != nil { return nil }
+	if err != nil {
+		return nil
+	}
 
 	if !h.requireGroupRole(c, group.ID, postgres.RoleAdmin) {
 		return nil
@@ -1106,7 +1185,9 @@ func (h *Handler) onAddMod(c tele.Context) error {
 	target, errMsg := h.extractTarget(c)
 	if errMsg != "" {
 		msg, _ := c.Bot().Send(c.Chat(), errMsg, tele.ModeMarkdown)
-		if msg != nil { autoDeleteAfter(c.Bot(), msg, 10*time.Second) }
+		if msg != nil {
+			autoDeleteAfter(c.Bot(), msg, 10*time.Second)
+		}
 		return nil
 	}
 
@@ -1115,10 +1196,14 @@ func (h *Handler) onAddMod(c tele.Context) error {
 	}
 
 	name := target.FirstName
-	if target.Username != "" { name = "@" + target.Username }
+	if target.Username != "" {
+		name = "@" + target.Username
+	}
 	msg, _ := c.Bot().Send(c.Chat(),
 		fmt.Sprintf("🔧 *%s* has been registered as *Moderator*.", name), tele.ModeMarkdown)
-	if msg != nil { autoDeleteAfter(c.Bot(), msg, 20*time.Second) }
+	if msg != nil {
+		autoDeleteAfter(c.Bot(), msg, 20*time.Second)
+	}
 	return nil
 }
 
@@ -1133,7 +1218,9 @@ func (h *Handler) onRemoveRole(c tele.Context) error {
 	defer cancel()
 
 	group, err := h.svc.GetGroup(ctx, c.Chat().ID)
-	if err != nil { return nil }
+	if err != nil {
+		return nil
+	}
 
 	if !h.requireOwnerOnly(c, group.ID) {
 		return nil
@@ -1142,7 +1229,9 @@ func (h *Handler) onRemoveRole(c tele.Context) error {
 	target, errMsg := h.extractTarget(c)
 	if errMsg != "" {
 		msg, _ := c.Bot().Send(c.Chat(), errMsg, tele.ModeMarkdown)
-		if msg != nil { autoDeleteAfter(c.Bot(), msg, 10*time.Second) }
+		if msg != nil {
+			autoDeleteAfter(c.Bot(), msg, 10*time.Second)
+		}
 		return nil
 	}
 
@@ -1151,10 +1240,14 @@ func (h *Handler) onRemoveRole(c tele.Context) error {
 	}
 
 	name := target.FirstName
-	if target.Username != "" { name = "@" + target.Username }
+	if target.Username != "" {
+		name = "@" + target.Username
+	}
 	msg, _ := c.Bot().Send(c.Chat(),
 		fmt.Sprintf("🗑️ Permissions removed for *%s*.", name), tele.ModeMarkdown)
-	if msg != nil { autoDeleteAfter(c.Bot(), msg, 20*time.Second) }
+	if msg != nil {
+		autoDeleteAfter(c.Bot(), msg, 20*time.Second)
+	}
 	return nil
 }
 
@@ -1169,7 +1262,9 @@ func (h *Handler) onListAdmins(c tele.Context) error {
 	defer cancel()
 
 	group, err := h.svc.GetGroup(ctx, c.Chat().ID)
-	if err != nil { return nil }
+	if err != nil {
+		return nil
+	}
 
 	if !h.requireGroupRole(c, group.ID, postgres.RoleModerator) {
 		return nil
@@ -1178,7 +1273,9 @@ func (h *Handler) onListAdmins(c tele.Context) error {
 	admins, err := h.adminSvc.ListAdmins(ctx, group.ID)
 	if err != nil || len(admins) == 0 {
 		msg, _ := c.Bot().Send(c.Chat(), "📋 No admins or moderators configured.", tele.ModeMarkdown)
-		if msg != nil { autoDeleteAfter(c.Bot(), msg, 15*time.Second) }
+		if msg != nil {
+			autoDeleteAfter(c.Bot(), msg, 15*time.Second)
+		}
 		return nil
 	}
 
@@ -1203,7 +1300,9 @@ func (h *Handler) onListAdmins(c tele.Context) error {
 	sb.WriteString("\n_This message will self-destruct in 20 seconds_ 🧹")
 
 	msg, _ := c.Bot().Send(c.Chat(), sb.String(), tele.ModeMarkdown)
-	if msg != nil { autoDeleteAfter(c.Bot(), msg, 20*time.Second) }
+	if msg != nil {
+		autoDeleteAfter(c.Bot(), msg, 20*time.Second)
+	}
 	return nil
 }
 

@@ -80,6 +80,11 @@ func (s *GroupService) GetManagedGroups(ctx context.Context, telegramID int64) (
 	return s.groupRepo.ListManagedGroups(ctx, telegramID)
 }
 
+// SetGroupActive updates the is_active flag for a group.
+func (s *GroupService) SetGroupActive(ctx context.Context, groupDBID int64, active bool) error {
+	return s.groupRepo.SetGroupActive(ctx, groupDBID, active)
+}
+
 // ShouldFilterMessage checks if a message violates the group rules.
 // Returns true if the message should be deleted.
 func (s *GroupService) ShouldFilterMessage(ctx context.Context, group *domain.Group, text string) (bool, string) {
@@ -196,4 +201,7 @@ func (s *GroupService) SetBanStatus(ctx context.Context, groupDBID, targetTelegr
 	return s.userRepo.SetBanStatus(ctx, groupDBID, targetTelegramID, banned)
 }
 
-
+// SoftDeleteMember marks a user's membership as deleted when they leave/are removed.
+func (s *GroupService) SoftDeleteMember(ctx context.Context, groupDBID, telegramID int64) error {
+	return s.userRepo.SoftDeleteMember(ctx, groupDBID, telegramID)
+}

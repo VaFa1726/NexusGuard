@@ -20,15 +20,15 @@ var (
 
 // RegisterMemberHandlers attaches member management handlers to the bot.
 func (h *Handler) RegisterMemberHandlers(b *tele.Bot) {
-	b.Handle("/banned",  h.onBanned)
-	b.Handle("/warned",  h.onWarned)
-	b.Handle("/muted",   h.onMuted)
+	b.Handle("/banned", h.onBanned)
+	b.Handle("/warned", h.onWarned)
+	b.Handle("/muted", h.onMuted)
 	b.Handle("/members", h.onMembers)
-	b.Handle("/unmute",  h.onUnmute) // reply to muted user → immediate unmute
-	b.Handle("/unban",   h.onUnban)  // reply to banned user → immediate unban
+	b.Handle("/unmute", h.onUnmute) // reply to muted user → immediate unmute
+	b.Handle("/unban", h.onUnban)   // reply to banned user → immediate unban
 
-	b.Handle(&btnUnban,      h.onCallbackUnban)
-	b.Handle(&btnUnmute,     h.onCallbackUnmute)
+	b.Handle(&btnUnban, h.onCallbackUnban)
+	b.Handle(&btnUnmute, h.onCallbackUnmute)
 	b.Handle(&btnResetWarns, h.onCallbackResetWarns)
 }
 
