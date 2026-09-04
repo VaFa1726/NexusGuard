@@ -117,6 +117,23 @@ func (r *AdminRepository) HasAnyRole(ctx context.Context, telegramID int64) bool
 	return err == nil && exists
 }
 
+// IsOwnerOfAnyGroup returns true if the user is the Owner of at least one group.
+// Used to gate access to the full PV management dashboard.
+// Only owners (users who added the bot) may access the private dashboard.
+// Admins and Moderators may only use in-group commands.
+func (r *AdminRepository) IsOwnerOfAnyGroup(ctx context.Context, telegramID int64) bool {
+	var exists bool
+	err := r.pool.QueryRow(ctx,
+		`SELECT EXISTS(
+			SELECT 1 FROM group_bot_admins
+			WHERE telegram_id = $1 AND role = 'owner'
+		)`,
+		telegramID,
+	).Scan(&exists)
+	return err == nil && exists
+}
+
+
 // GetRoleInAnyGroup returns the highest role a user holds across all groups.
 // Returns empty string if the user has no roles.
 func (r *AdminRepository) GetRoleInAnyGroup(ctx context.Context, telegramID int64) BotRole {

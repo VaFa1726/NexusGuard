@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 	"time"
 
@@ -124,6 +123,33 @@ func (h *Handler) onStart(c tele.Context) error {
 		name = user.Username
 	}
 
+	// Delete the command message so it doesn't clutter the chat
+	if c.Message() != nil {
+		_ = c.Bot().Delete(c.Message())
+	}
+
+	// ── Auth check: only owners of a group can access the management panel ──
+	isOwner := h.adminRepo.IsOwnerOfAnyGroup(ctx, user.ID)
+	if !isOwner {
+		// Non-owner: show minimal message — add bot to group to get started
+		botUsername := c.Bot().Me.Username
+		addURL := fmt.Sprintf("https://t.me/%s?startgroup=true", botUsername)
+		text := fmt.Sprintf(
+			"🛡️ *NexusGuard*\n\n"+
+				"Hi *%s*! To use this bot you need to add it to your group as an administrator.\n\n"+
+				"Once added, you'll automatically become the group Owner and can manage everything from here.",
+			name,
+		)
+		menu := &tele.ReplyMarkup{}
+		menu.Inline(menu.Row(menu.URL("➕ Add Bot to My Group", addURL)))
+		msg, err := c.Bot().Send(c.Sender(), text, menu, tele.ModeMarkdown)
+		if err == nil {
+			autoDeleteAfter(c.Bot(), msg, 30*time.Second)
+		}
+		return err
+	}
+
+	// ── Owner: show full management menu ──
 	text := fmt.Sprintf(
 		"🛡️ *Welcome to NexusGuard, %s!*\n\n"+
 			"• 🔗 Smart spam & link filtering\n"+
@@ -136,10 +162,6 @@ func (h *Handler) onStart(c tele.Context) error {
 			"Select an option below ⬇️", name,
 	)
 
-	if c.Message() != nil {
-		_ = c.Bot().Delete(c.Message())
-	}
-
 	botUsername := c.Bot().Me.Username
 	menu := mainMenu(botUsername)
 	msg, err := c.Bot().Send(c.Sender(), text, menu, tele.ModeMarkdown)
@@ -148,6 +170,7 @@ func (h *Handler) onStart(c tele.Context) error {
 	}
 	return err
 }
+
 
 func mainMenu(botUsername string) *tele.ReplyMarkup {
 	menu := &tele.ReplyMarkup{}
@@ -203,6 +226,9 @@ func (h *Handler) onHelp(c tele.Context) error {
 // ─── Private button callbacks ────────────────────────────────────────────────
 
 func (h *Handler) onBtnStatus(c tele.Context) error {
+	if !h.requirePrivateAuth(c) {
+		return answerUnauthorizedCallback(c)
+	}
 	text := "📡 *NexusGuard System Status*\n\n" +
 		"✅ Telegram API: Connected & Active\n" +
 		"✅ PostgreSQL: Connected & Healthy\n" +
@@ -212,6 +238,9 @@ func (h *Handler) onBtnStatus(c tele.Context) error {
 }
 
 func (h *Handler) onBtnProfile(c tele.Context) error {
+	if !h.requirePrivateAuth(c) {
+		return answerUnauthorizedCallback(c)
+	}
 	user := c.Sender()
 	uname := "—"
 	if user.Username != "" {
@@ -228,6 +257,9 @@ func (h *Handler) onBtnProfile(c tele.Context) error {
 }
 
 func (h *Handler) onBtnAddBot(c tele.Context) error {
+	if !h.requirePrivateAuth(c) {
+		return answerUnauthorizedCallback(c)
+	}
 	botUsername := c.Bot().Me.Username
 	addURL := fmt.Sprintf("https://t.me/%s?startgroup=true", botUsername)
 	text := "➕ *Add NexusGuard to Your Group*\n\n" +
@@ -246,6 +278,9 @@ func (h *Handler) onBtnAddBot(c tele.Context) error {
 }
 
 func (h *Handler) onBtnMyGroups(c tele.Context) error {
+	if !h.requirePrivateAuth(c) {
+		return answerUnauthorizedCallback(c)
+	}
 	return h.showMyGroups(c)
 }
 
@@ -253,13 +288,14 @@ func (h *Handler) showMyGroups(c tele.Context) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	groups, err := h.svc.GetManagedGroups(ctx, c.Sender().ID)
+	// Only show groups where this user is the Owner (not just any admin/moderator)
+	groups, err := h.svc.GetOwnerGroups(ctx, c.Sender().ID)
 	botUsername := c.Bot().Me.Username
 	addURL := fmt.Sprintf("https://t.me/%s?startgroup=true", botUsername)
 
 	if err != nil || len(groups) == 0 {
 		text := "🏘️ *My Groups*\n\n" +
-			"No managed groups registered yet.\n" +
+			"No groups found where you are the Owner.\n" +
 			"Add the bot as an administrator to your group to manage it here."
 		menu := &tele.ReplyMarkup{}
 		menu.Inline(
@@ -269,10 +305,11 @@ func (h *Handler) showMyGroups(c tele.Context) error {
 		return c.Edit(text, menu, tele.ModeMarkdown)
 	}
 
-	text := fmt.Sprintf("🏘️ *Manage My Groups* (%d groups)\n\nSelect a group to manage members, admins, and security settings:", len(groups))
+	text := fmt.Sprintf("🏘️ *My Groups* (%d groups)\n\nSelect a group to manage members, admins, and security settings:", len(groups))
 	menu := &tele.ReplyMarkup{}
 	var rows []tele.Row
 
+	callerID := c.Sender().ID
 	for _, g := range groups {
 		status := "🟢"
 		if !g.IsActive {
@@ -283,7 +320,9 @@ func (h *Handler) showMyGroups(c tele.Context) error {
 			title = fmt.Sprintf("Group %d", g.TelegramID)
 		}
 		btnLabel := fmt.Sprintf("%s 🛡️ %s", status, truncate(title, 22))
-		data := strconv.FormatInt(g.TelegramID, 10)
+		// Embed callerID in callback data: "<groupTelegramID>:<callerTelegramID>"
+		// This ensures only the person who opened the menu can interact with it
+		data := fmt.Sprintf("%d:%d", g.TelegramID, callerID)
 		rows = append(rows, menu.Row(
 			menu.Data(btnLabel, btnManageGroup.Unique, data),
 		))
@@ -301,10 +340,16 @@ func (h *Handler) showMyGroups(c tele.Context) error {
 }
 
 func (h *Handler) onBtnHelp(c tele.Context) error {
+	if !h.requirePrivateAuth(c) {
+		return answerUnauthorizedCallback(c)
+	}
 	return h.onHelp(c)
 }
 
 func (h *Handler) onBack(c tele.Context) error {
+	if !h.requirePrivateAuth(c) {
+		return answerUnauthorizedCallback(c)
+	}
 	user := c.Sender()
 	name := user.FirstName
 	if name == "" {
@@ -316,8 +361,12 @@ func (h *Handler) onBack(c tele.Context) error {
 }
 
 func (h *Handler) onMyGroups(c tele.Context) error {
+	if !h.requirePrivateAuth(c) {
+		return nil
+	}
 	return h.showMyGroups(c)
 }
+
 
 func backMenu() *tele.ReplyMarkup {
 	menu := &tele.ReplyMarkup{}
@@ -631,18 +680,19 @@ func settingsText(g *domain.Group) string {
 	)
 }
 
-func settingsMenu(g *domain.Group) *tele.ReplyMarkup {
+func settingsMenu(g *domain.Group, callerID int64) *tele.ReplyMarkup {
 	linkLabel := fmt.Sprintf("🔗 Link Filter: %s", map[bool]string{true: "✅", false: "❌"}[g.FilterLinks])
 	profLabel := fmt.Sprintf("🤬 Profanity Filter: %s", map[bool]string{true: "✅", false: "❌"}[g.FilterProfanity])
 	wlcLabel := fmt.Sprintf("👋 Welcome Message: %s", map[bool]string{true: "✅", false: "❌"}[g.WelcomeEnabled])
-	data := strconv.FormatInt(g.TelegramID, 10)
+	// Use dashboard data format to carry callerID through toggle callbacks
+	data := buildDashboardData(g.TelegramID, callerID)
 
 	menu := &tele.ReplyMarkup{}
 	menu.Inline(
 		menu.Row(menu.Data(linkLabel, btnToggleLinks.Unique, data)),
 		menu.Row(menu.Data(profLabel, btnToggleProfanity.Unique, data)),
 		menu.Row(menu.Data(wlcLabel, btnToggleWelcome.Unique, data)),
-		menu.Row(menu.Data("🔙 Back to Group Panel", btnManageGroup.Unique, data)),
+		menu.Row(menu.Data("🔙 Back to Group Panel", btnSettingsBack.Unique, data)),
 	)
 	return menu
 }
@@ -658,25 +708,23 @@ func (h *Handler) onToggleWelcome(c tele.Context) error {
 }
 
 func (h *Handler) toggleSetting(c tele.Context, toggle func(*domain.Group)) error {
+	// Use parseDashboardCallback so callerID is verified
+	groupTelegramID, authorized := parseDashboardCallback(c)
+	if !authorized {
+		return answerUnauthorizedCallback(c)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
-	groupTelegramID, err := strconv.ParseInt(c.Data(), 10, 64)
-	if err != nil {
-		if c.Message() != nil && c.Message().Chat != nil {
-			groupTelegramID = c.Message().Chat.ID
-		}
-	}
 
 	group, err := h.svc.GetGroup(ctx, groupTelegramID)
 	if err != nil {
 		return c.Respond(&tele.CallbackResponse{Text: "❌ Failed to retrieve group"})
 	}
 
-	// Permission check: only Admin+ or Owner may change settings
-	role := h.checkBotRole(ctx, group.ID, c.Sender().ID)
-	if !postgres.HasMinRole(role, postgres.RoleAdmin) && group.OwnerID != c.Sender().ID {
-		return c.Respond(&tele.CallbackResponse{Text: "🚫 Admin or Owner permission required"})
+	// Only the Owner may change settings
+	if group.OwnerID != c.Sender().ID {
+		return answerUnauthorizedCallback(c)
 	}
 
 	toggle(group)
@@ -684,19 +732,41 @@ func (h *Handler) toggleSetting(c tele.Context, toggle func(*domain.Group)) erro
 		return c.Respond(&tele.CallbackResponse{Text: "❌ Failed to save settings"})
 	}
 	_ = c.Respond(&tele.CallbackResponse{Text: "✅ Saved"})
-	return c.Edit(settingsText(group), settingsMenu(group), tele.ModeMarkdown)
+	return c.Edit(settingsText(group), settingsMenu(group, c.Sender().ID), tele.ModeMarkdown)
 }
 
 func (h *Handler) onSettingsBack(c tele.Context) error {
 	return h.onManageGroup(c)
 }
 
+
+// ─── Secure callback data helpers ────────────────────────────────────────────
+
+// parseDashboardCallback parses "<groupTelegramID>:<callerTelegramID>" callback data.
+// Returns (groupTelegramID, authorized) where authorized is true only if the presser
+// is the same user who opened the dashboard.
+func parseDashboardCallback(c tele.Context) (groupTelegramID int64, authorized bool) {
+	data := c.Data()
+	var gID, cID int64
+	n, err := fmt.Sscanf(data, "%d:%d", &gID, &cID)
+	if err != nil || n != 2 {
+		return 0, false
+	}
+	return gID, c.Sender().ID == cID
+}
+
+// buildDashboardData builds "<groupTelegramID>:<callerTelegramID>" callback data.
+func buildDashboardData(groupTelegramID, callerID int64) string {
+	return fmt.Sprintf("%d:%d", groupTelegramID, callerID)
+}
+
 // ─── Private Group Dashboard Handlers ────────────────────────────────────────
 
 func (h *Handler) onManageGroup(c tele.Context) error {
-	groupTelegramID, err := strconv.ParseInt(c.Data(), 10, 64)
-	if err != nil {
-		return c.Respond(&tele.CallbackResponse{Text: "❌ Invalid group ID"})
+	groupTelegramID, authorized := parseDashboardCallback(c)
+	if !authorized {
+		// Not the person who opened the menu — silently ignore
+		return answerUnauthorizedCallback(c)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -707,9 +777,9 @@ func (h *Handler) onManageGroup(c tele.Context) error {
 		return c.Respond(&tele.CallbackResponse{Text: "❌ Group not found"})
 	}
 
-	role := h.checkBotRole(ctx, group.ID, c.Sender().ID)
-	if !postgres.HasMinRole(role, postgres.RoleModerator) && group.OwnerID != c.Sender().ID {
-		return c.Respond(&tele.CallbackResponse{Text: "🚫 Management permission required"})
+	// Verify sender is actually the owner of this group
+	if group.OwnerID != c.Sender().ID {
+		return answerUnauthorizedCallback(c)
 	}
 
 	statusStr := "🟢 Active"
@@ -744,7 +814,8 @@ func (h *Handler) onManageGroup(c tele.Context) error {
 		group.MaxWarns, group.MuteDuration,
 	)
 
-	data := strconv.FormatInt(group.TelegramID, 10)
+	callerID := c.Sender().ID
+	data := buildDashboardData(group.TelegramID, callerID)
 	menu := &tele.ReplyMarkup{}
 	menu.Inline(
 		menu.Row(menu.Data("⚙️ Security Settings", btnGroupSettings.Unique, data)),
@@ -769,9 +840,9 @@ func (h *Handler) onManageGroup(c tele.Context) error {
 }
 
 func (h *Handler) onGroupSettings(c tele.Context) error {
-	groupTelegramID, err := strconv.ParseInt(c.Data(), 10, 64)
-	if err != nil {
-		return c.Respond(&tele.CallbackResponse{Text: "❌ Invalid group ID"})
+	groupTelegramID, authorized := parseDashboardCallback(c)
+	if !authorized {
+		return answerUnauthorizedCallback(c)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -782,19 +853,18 @@ func (h *Handler) onGroupSettings(c tele.Context) error {
 		return c.Respond(&tele.CallbackResponse{Text: "❌ Group not found"})
 	}
 
-	role := h.checkBotRole(ctx, group.ID, c.Sender().ID)
-	if !postgres.HasMinRole(role, postgres.RoleAdmin) && group.OwnerID != c.Sender().ID {
-		return c.Respond(&tele.CallbackResponse{Text: "🚫 Admin or Owner permission required"})
+	if group.OwnerID != c.Sender().ID {
+		return answerUnauthorizedCallback(c)
 	}
 
 	_ = c.Respond()
-	return c.Edit(settingsText(group), settingsMenu(group), tele.ModeMarkdown)
+	return c.Edit(settingsText(group), settingsMenu(group, c.Sender().ID), tele.ModeMarkdown)
 }
 
 func (h *Handler) onGroupMembers(c tele.Context) error {
-	groupTelegramID, err := strconv.ParseInt(c.Data(), 10, 64)
-	if err != nil {
-		return c.Respond(&tele.CallbackResponse{Text: "❌ Invalid group ID"})
+	groupTelegramID, authorized := parseDashboardCallback(c)
+	if !authorized {
+		return answerUnauthorizedCallback(c)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -803,6 +873,10 @@ func (h *Handler) onGroupMembers(c tele.Context) error {
 	group, err := h.svc.GetGroup(ctx, groupTelegramID)
 	if err != nil {
 		return c.Respond(&tele.CallbackResponse{Text: "❌ Group not found"})
+	}
+
+	if group.OwnerID != c.Sender().ID {
+		return answerUnauthorizedCallback(c)
 	}
 
 	members, err := h.svc.ListAllMembers(ctx, group.ID, 25)
@@ -821,8 +895,8 @@ func (h *Handler) onGroupMembers(c tele.Context) error {
 		}
 	}
 
+	data := buildDashboardData(group.TelegramID, c.Sender().ID)
 	menu := &tele.ReplyMarkup{}
-	data := strconv.FormatInt(group.TelegramID, 10)
 	menu.Inline(menu.Row(menu.Data("🔙 Back to Group Panel", btnManageGroup.Unique, data)))
 
 	_ = c.Respond()
@@ -830,9 +904,9 @@ func (h *Handler) onGroupMembers(c tele.Context) error {
 }
 
 func (h *Handler) onGroupAdmins(c tele.Context) error {
-	groupTelegramID, err := strconv.ParseInt(c.Data(), 10, 64)
-	if err != nil {
-		return c.Respond(&tele.CallbackResponse{Text: "❌ Invalid group ID"})
+	groupTelegramID, authorized := parseDashboardCallback(c)
+	if !authorized {
+		return answerUnauthorizedCallback(c)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -841,6 +915,10 @@ func (h *Handler) onGroupAdmins(c tele.Context) error {
 	group, err := h.svc.GetGroup(ctx, groupTelegramID)
 	if err != nil {
 		return c.Respond(&tele.CallbackResponse{Text: "❌ Group not found"})
+	}
+
+	if group.OwnerID != c.Sender().ID {
+		return answerUnauthorizedCallback(c)
 	}
 
 	admins, err := h.adminSvc.ListAdmins(ctx, group.ID)
@@ -866,8 +944,8 @@ func (h *Handler) onGroupAdmins(c tele.Context) error {
 		}
 	}
 
+	data := buildDashboardData(group.TelegramID, c.Sender().ID)
 	menu := &tele.ReplyMarkup{}
-	data := strconv.FormatInt(group.TelegramID, 10)
 	menu.Inline(menu.Row(menu.Data("🔙 Back to Group Panel", btnManageGroup.Unique, data)))
 
 	_ = c.Respond()
@@ -875,9 +953,9 @@ func (h *Handler) onGroupAdmins(c tele.Context) error {
 }
 
 func (h *Handler) onGroupWarned(c tele.Context) error {
-	groupTelegramID, err := strconv.ParseInt(c.Data(), 10, 64)
-	if err != nil {
-		return c.Respond(&tele.CallbackResponse{Text: "❌ Invalid group ID"})
+	groupTelegramID, authorized := parseDashboardCallback(c)
+	if !authorized {
+		return answerUnauthorizedCallback(c)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -888,8 +966,12 @@ func (h *Handler) onGroupWarned(c tele.Context) error {
 		return c.Respond(&tele.CallbackResponse{Text: "❌ Group not found"})
 	}
 
+	if group.OwnerID != c.Sender().ID {
+		return answerUnauthorizedCallback(c)
+	}
+
 	members, err := h.svc.ListWarnedMembers(ctx, group.ID)
-	data := strconv.FormatInt(group.TelegramID, 10)
+	data := buildDashboardData(group.TelegramID, c.Sender().ID)
 	markup := &tele.ReplyMarkup{}
 	backRow := markup.Row(markup.Data("🔙 Back to Group Panel", btnManageGroup.Unique, data))
 	text, menu := buildWarnedList(members, group.TelegramID, group.MaxWarns, backRow)
@@ -899,9 +981,9 @@ func (h *Handler) onGroupWarned(c tele.Context) error {
 }
 
 func (h *Handler) onGroupMuted(c tele.Context) error {
-	groupTelegramID, err := strconv.ParseInt(c.Data(), 10, 64)
-	if err != nil {
-		return c.Respond(&tele.CallbackResponse{Text: "❌ Invalid group ID"})
+	groupTelegramID, authorized := parseDashboardCallback(c)
+	if !authorized {
+		return answerUnauthorizedCallback(c)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -912,8 +994,12 @@ func (h *Handler) onGroupMuted(c tele.Context) error {
 		return c.Respond(&tele.CallbackResponse{Text: "❌ Group not found"})
 	}
 
+	if group.OwnerID != c.Sender().ID {
+		return answerUnauthorizedCallback(c)
+	}
+
 	members, err := h.svc.ListMutedMembers(ctx, group.ID)
-	data := strconv.FormatInt(group.TelegramID, 10)
+	data := buildDashboardData(group.TelegramID, c.Sender().ID)
 	markup := &tele.ReplyMarkup{}
 	backRow := markup.Row(markup.Data("🔙 Back to Group Panel", btnManageGroup.Unique, data))
 	text, menu := buildMutedList(members, group.TelegramID, backRow)
@@ -923,9 +1009,9 @@ func (h *Handler) onGroupMuted(c tele.Context) error {
 }
 
 func (h *Handler) onGroupBanned(c tele.Context) error {
-	groupTelegramID, err := strconv.ParseInt(c.Data(), 10, 64)
-	if err != nil {
-		return c.Respond(&tele.CallbackResponse{Text: "❌ Invalid group ID"})
+	groupTelegramID, authorized := parseDashboardCallback(c)
+	if !authorized {
+		return answerUnauthorizedCallback(c)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -936,8 +1022,12 @@ func (h *Handler) onGroupBanned(c tele.Context) error {
 		return c.Respond(&tele.CallbackResponse{Text: "❌ Group not found"})
 	}
 
+	if group.OwnerID != c.Sender().ID {
+		return answerUnauthorizedCallback(c)
+	}
+
 	members, err := h.svc.ListBannedMembers(ctx, group.ID)
-	data := strconv.FormatInt(group.TelegramID, 10)
+	data := buildDashboardData(group.TelegramID, c.Sender().ID)
 	markup := &tele.ReplyMarkup{}
 	backRow := markup.Row(markup.Data("🔙 Back to Group Panel", btnManageGroup.Unique, data))
 	text, menu := buildBannedList(members, group.TelegramID, backRow)
@@ -945,6 +1035,7 @@ func (h *Handler) onGroupBanned(c tele.Context) error {
 	_ = c.Respond()
 	return c.Edit(text, menu, tele.ModeMarkdown)
 }
+
 
 // ─── /addadmin ───────────────────────────────────────────────────────────────
 func (h *Handler) onAddAdmin(c tele.Context) error {

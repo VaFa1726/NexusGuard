@@ -60,16 +60,17 @@ func sendEphemeralWithMenu(c tele.Context, text string, menu *tele.ReplyMarkup) 
 
 // ─── Private Chat Authentication Gate ────────────────────────────────────────
 
-// requirePrivateAuth checks if the sender is authorized to use the bot in private.
-// Only users who have at least one bot role in any group may interact with the bot privately.
+// requirePrivateAuth checks if the sender is authorized to use the bot in private chat.
+// Only users who are the Owner of at least one group may interact with the PV dashboard.
+// Admins and Moderators are restricted to in-group commands only.
 // If unauthorized: silently does nothing and returns false.
 func (h *Handler) requirePrivateAuth(c tele.Context) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	authorized := h.adminRepo.HasAnyRole(ctx, c.Sender().ID)
+	authorized := h.adminRepo.IsOwnerOfAnyGroup(ctx, c.Sender().ID)
 	if !authorized {
-		slog.Debug("Unauthorized private chat attempt",
+		slog.Debug("Unauthorized private chat attempt — user is not owner of any group",
 			"user_id", c.Sender().ID,
 			"username", c.Sender().Username,
 		)
