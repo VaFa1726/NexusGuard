@@ -79,6 +79,7 @@ func (r *UserRepository) UpsertMember(ctx context.Context, groupDBID, userDBID i
 }
 
 // IncrementWarn adds a warn and returns new warn count.
+// Uses a transaction to ensure consistency between warn count and warn log.
 func (r *UserRepository) IncrementWarn(ctx context.Context, memberID int64, reason string, groupID, userID, adminID int64) (int, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -90,15 +91,19 @@ func (r *UserRepository) IncrementWarn(ctx context.Context, memberID int64, reas
 
 	var warnCount int
 	err = tx.QueryRow(ctx,
-		`UPDATE group_members SET warn_count = warn_count + 1, updated_at = NOW()
-		 WHERE id = $1 RETURNING warn_count`, memberID,
+		`UPDATE group_members 
+		 SET warn_count = warn_count + 1, updated_at = NOW()
+		 WHERE id = $1 
+		 RETURNING warn_count`, 
+		memberID,
 	).Scan(&warnCount)
 	if err != nil {
 		return 0, err
 	}
 
 	_, err = tx.Exec(ctx,
-		`INSERT INTO warn_logs (group_id, user_id, admin_id, reason) VALUES ($1, $2, $3, $4)`,
+		`INSERT INTO warn_logs (group_id, user_id, admin_id, reason, created_at) 
+		 VALUES ($1, $2, $3, $4, NOW())`,
 		groupID, userID, adminID, reason,
 	)
 	if err != nil {
