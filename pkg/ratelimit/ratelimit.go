@@ -93,9 +93,9 @@ func (l *Limiter) cleanup() {
 	// A more sophisticated approach would track last access time
 	
 	// Log cleanup if count is high
-	if count > 1000 {
-		// Could implement more aggressive cleanup here if needed
-	}
+	// if count > 1000 {
+	// 	// Could implement more aggressive cleanup here if needed
+	// }
 }
 
 // GetStats returns current rate limiter statistics.

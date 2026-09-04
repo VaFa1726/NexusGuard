@@ -37,8 +37,12 @@ func (h *Handler) Start(port string) {
 	http.HandleFunc("/metrics", h.metrics)
 
 	slog.Info("Starting health check server", "port", port)
+	srv := &http.Server{
+		Addr:              ":" + port,
+		ReadHeaderTimeout: 3 * time.Second,
+	}
 	go func() {
-		if err := http.ListenAndServe(":"+port, nil); err != nil {
+		if err := srv.ListenAndServe(); err != nil {
 			slog.Error("Health check server failed", "error", err)
 		}
 	}()
@@ -67,7 +71,7 @@ func (h *Handler) healthCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(status)
+	_ = json.NewEncoder(w).Encode(status)
 }
 
 // readinessCheck returns whether the service is ready to accept traffic
@@ -77,12 +81,12 @@ func (h *Handler) readinessCheck(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.pool.Ping(ctx); err != nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte("not ready"))
+		_, _ = w.Write([]byte("not ready"))
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("ready"))
+	_, _ = w.Write([]byte("ready"))
 }
 
 // metrics returns basic metrics (can be extended for Prometheus)
@@ -103,5 +107,5 @@ func (h *Handler) metrics(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(metrics)
+	_ = json.NewEncoder(w).Encode(metrics)
 }
