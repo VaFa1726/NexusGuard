@@ -1,21 +1,60 @@
-# NexusGuard 🛡️
-A high-performance Telegram Bot written in Go, designed for administration or guarding communities.
+<div align="center">
+  <h1>NexusGuard 🛡️</h1>
+  <p>A high-performance Telegram Bot written in Go, designed for administration and monitoring.</p>
+  
+  ![Go](https://img.shields.io/badge/Go-00ADD8?style=for-the-badge&logo=go&logoColor=white)
+  ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white)
+  ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+</div>
 
-## Features
-- **Telegram Bot API**: Uses `telebot.v3` for fast and reliable bot interactions.
-- **PostgreSQL Database**: Uses `pgx/v5` driver for high-performance database queries and pooling.
-- **Dockerized**: Fully containerized setup with `Dockerfile` and `docker-compose.yml` for easy deployment.
-- **Make Automation**: Includes a `Makefile` for streamlined building and testing.
+---
 
-## Tech Stack
-- **Language**: Go 1.25+
-- **Database**: PostgreSQL
-- **Libraries**: `telebot.v3`, `pgx/v5`
+## 📌 Overview
+NexusGuard is a robust Telegram bot application built with Go. It leverages the `telebot.v3` framework for interacting with the Telegram API and connects to a PostgreSQL database using `pgx/v5` for high-performance data operations. 
 
-## Getting Started
-1. Clone the repo.
-2. Copy `.env.example` to `.env` and configure your Bot Token and DB credentials.
-3. Run with Docker:
+## ✨ Features
+- **Telegram Bot API Integration**: Fast and reliable bot interactions.
+- **Database Connection Pooling**: Optimized queries using `pgx/v5`.
+- **Dockerized Environment**: Fully containerized setup for seamless deployment.
+- **Make Automation**: Streamlined building and testing via `Makefile`.
+
+## 🛠️ Prerequisites
+- Go 1.25 or higher
+- Docker and Docker Compose
+- PostgreSQL (if running locally without Docker)
+
+## 🚀 Installation & Usage
+
+1. **Clone the repository:**
    ```bash
-   docker-compose up -d
+   git clone https://github.com/VaFa1726/NexusGuard.git
+   cd NexusGuard
    ```
+
+2. **Environment Setup:**
+   Copy the `.env.example` file to `.env` and fill in your Telegram Bot Token and Database credentials.
+   ```bash
+   cp .env.example .env
+   ```
+
+3. **Run with Docker (Recommended):**
+   ```bash
+   docker-compose up -d --build
+   ```
+
+4. **Build Locally (Using Makefile):**
+   ```bash
+   make build
+   make run
+   ```
+
+## 📂 Project Architecture
+Following Go standard project layout:
+```text
+NexusGuard/
+├── cmd/               # Main applications for this project
+├── internal/          # Private application and library code
+├── pkg/               # Library code that's ok to use by external applications
+├── docker-compose.yml # Container orchestration
+└── Makefile           # Build automation
+```
