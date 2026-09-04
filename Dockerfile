@@ -1,22 +1,34 @@
-# Stage 1: Build the Go binary
+# ─── Stage 1: Build ───────────────────────────────────────────────────────────
 FROM golang:1.25-alpine AS builder
+
+# Install CA certificates for HTTPS calls
+RUN apk add --no-cache ca-certificates git
 
 WORKDIR /app
 
-# Download dependencies first (layer cache optimization)
+# Cache dependencies first
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy the source code
+# Copy source
 COPY . .
 
-# Build a statically-linked binary with no debug symbols
+# Build a statically-linked binary — no CGO, stripped symbols
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -ldflags="-s -w" -o /nexusguard_bot ./cmd/bot
 
-# Stage 2: Create a minimal, distroless runner image
-FROM gcr.io/distroless/static-debian12:nonroot
+# ─── Stage 2: Minimal runtime ─────────────────────────────────────────────────
+FROM alpine:3.20
 
-COPY --from=builder /nexusguard_bot /nexusguard_bot
+# CA certs for HTTPS (Telegram API)
+RUN apk add --no-cache ca-certificates tzdata
 
-ENTRYPOINT ["/nexusguard_bot"]
+WORKDIR /app
+
+COPY --from=builder /nexusguard_bot /app/nexusguard_bot
+
+# Run as non-root
+RUN adduser -D -u 1001 nexusguard
+USER nexusguard
+
+ENTRYPOINT ["/app/nexusguard_bot"]

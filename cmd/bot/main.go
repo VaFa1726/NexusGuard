@@ -12,45 +12,66 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nexusguard/bot/internal/delivery/telegram"
+	"github.com/nexusguard/bot/internal/repository/postgres"
+	"github.com/nexusguard/bot/internal/usecase"
 	"github.com/nexusguard/bot/pkg/config"
 	"github.com/nexusguard/bot/pkg/database"
 	"github.com/nexusguard/bot/pkg/logger"
 
-	"golang.org/x/net/proxy"
+	goProxy "golang.org/x/net/proxy"
 	tele "gopkg.in/telebot.v3"
 )
 
 func main() {
-	// Initialize structured JSON logger
+	// ── Logger ───────────────────────────────────────────────────────────────
 	logger.InitLogger()
-	slog.Info("Starting NexusGuard Bot...")
+	slog.Info("Starting NexusGuard Bot...", "version", "1.0.0")
 
-	// Load configuration from environment
+	// ── Config ───────────────────────────────────────────────────────────────
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		slog.Error("Failed to load config", "error", err)
 		os.Exit(1)
 	}
 
-	// Initialize database connection pool
-	db, err := database.Connect(cfg.DatabaseURL)
+	// ── Database ─────────────────────────────────────────────────────────────
+	pool, err := database.Connect(cfg.DatabaseURL)
 	if err != nil {
 		slog.Error("Failed to connect to database", "error", err)
 		os.Exit(1)
 	}
-	defer database.Close(db)
+	defer database.Close(pool)
 
-	// Build HTTP client — with proper proxy support if configured
+	// Run migrations
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := postgres.RunMigrations(ctx, pool); err != nil {
+		cancel()
+		slog.Error("Database migration failed", "error", err)
+		os.Exit(1)
+	}
+	cancel()
+
+	// ── HTTP Client with Proxy ────────────────────────────────────────────────
 	httpClient, err := buildHTTPClient(cfg.ProxyURL)
 	if err != nil {
 		slog.Error("Failed to configure HTTP client", "error", err)
 		os.Exit(1)
 	}
 
-	// Initialize Telegram Bot
+	// ── Telegram Bot ─────────────────────────────────────────────────────────
 	pref := tele.Settings{
 		Token:  cfg.TelegramToken,
-		Poller: &tele.LongPoller{Timeout: 10 * time.Second},
+		Poller: &tele.LongPoller{
+			Timeout: 10 * time.Second,
+			// Must explicitly allow my_chat_member to detect when bot is added to groups
+			AllowedUpdates: []string{
+				"message",
+				"callback_query",
+				"my_chat_member",
+				"chat_member",
+			},
+		},
 		Client: httpClient,
 	}
 
@@ -59,44 +80,47 @@ func main() {
 		slog.Error("Failed to initialize telegram bot", "error", err)
 		os.Exit(1)
 	}
+	slog.Info("Telegram bot connected", "username", bot.Me.Username, "id", bot.Me.ID)
 
-	// ─── Handlers ────────────────────────────────────────────────────────────
+	// ── Dependency Injection ─────────────────────────────────────────────────
+	groupRepo := postgres.NewGroupRepository(pool)
+	userRepo  := postgres.NewUserRepository(pool)
+	adminRepo := postgres.NewAdminRepository(pool)
 
-	bot.Handle("/start", func(c tele.Context) error {
-		return c.Send("سلام! به NexusGuard خوش آمدید. 🛡️\nمن اینجا هستم تا به شما کمک کنم.")
-	})
+	groupSvc  := usecase.NewGroupService(groupRepo, userRepo)
+	adminSvc  := usecase.NewAdminService(adminRepo, groupRepo)
 
-	bot.Handle("/ping", func(c tele.Context) error {
-		return c.Send("Pong! 🏓 NexusGuard is active.")
-	})
+	handler   := telegram.NewHandler(groupSvc, adminSvc, adminRepo)
 
-	// ─── Graceful Shutdown ────────────────────────────────────────────────────
+	// ── Register Handlers ─────────────────────────────────────────────────────
+	handler.RegisterAll(bot)
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// ── Graceful Shutdown ─────────────────────────────────────────────────────
+	shutdownCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	go func() {
-		slog.Info("Bot is now running", "username", bot.Me.Username)
+		slog.Info("NexusGuard is now running ✅", "bot", "@"+bot.Me.Username)
 		bot.Start()
 	}()
 
-	<-ctx.Done()
-	slog.Info("Shutting down gracefully...")
+	<-shutdownCtx.Done()
+	slog.Info("Shutdown signal received, stopping bot...")
 	bot.Stop()
-	slog.Info("NexusGuard stopped.")
+	slog.Info("NexusGuard stopped gracefully. Goodbye! 👋")
 }
 
-// buildHTTPClient creates an *http.Client with optional SOCKS5 or HTTP proxy support.
+// buildHTTPClient creates an *http.Client with optional SOCKS5 or HTTP proxy.
 func buildHTTPClient(proxyURL string) (*http.Client, error) {
 	if proxyURL == "" {
-		return &http.Client{}, nil
+		return &http.Client{Timeout: 30 * time.Second}, nil
 	}
 
 	slog.Info("Configuring proxy", "url", proxyURL)
 
 	if strings.HasPrefix(proxyURL, "socks5://") {
 		addr := strings.TrimPrefix(proxyURL, "socks5://")
-		dialer, err := proxy.SOCKS5("tcp", addr, nil, proxy.Direct)
+		dialer, err := goProxy.SOCKS5("tcp", addr, nil, goProxy.Direct)
 		if err != nil {
 			return nil, err
 		}
@@ -105,7 +129,7 @@ func buildHTTPClient(proxyURL string) (*http.Client, error) {
 				return dialer.Dial(network, address)
 			},
 		}
-		return &http.Client{Transport: transport}, nil
+		return &http.Client{Transport: transport, Timeout: 30 * time.Second}, nil
 	}
 
 	// HTTP / HTTPS proxy
@@ -113,8 +137,6 @@ func buildHTTPClient(proxyURL string) (*http.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	transport := &http.Transport{
-		Proxy: http.ProxyURL(parsed),
-	}
-	return &http.Client{Transport: transport}, nil
+	transport := &http.Transport{Proxy: http.ProxyURL(parsed)}
+	return &http.Client{Transport: transport, Timeout: 30 * time.Second}, nil
 }

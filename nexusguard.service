@@ -1,0 +1,28 @@
+[Unit]
+Description=NexusGuard Telegram Group Guardian Bot
+Documentation=https://github.com/nexusguard/bot
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nexusguard
+Group=nexusguard
+WorkingDirectory=/opt/nexusguard
+EnvironmentFile=/opt/nexusguard/.env
+ExecStart=/opt/nexusguard/nexusguard_bot
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nexusguard
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/nexusguard
+
+[Install]
+WantedBy=multi-user.target

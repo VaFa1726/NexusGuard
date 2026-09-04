@@ -18,16 +18,34 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - nexusguard_net
 
   bot:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: nexusguard_bot
     depends_on:
       postgres:
         condition: service_healthy
     env_file:
       - .env
+    environment:
+      # Override DATABASE_URL to use the docker internal hostname
+      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?sslmode=disable
     restart: unless-stopped
+    networks:
+      - nexusguard_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  nexusguard_net:
+    driver: bridge
 
 volumes:
   pgdata:
