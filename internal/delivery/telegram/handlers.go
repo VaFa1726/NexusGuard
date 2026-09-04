@@ -55,7 +55,6 @@ func (h *Handler) RegisterAll(b *tele.Bot) {
 	// ── Private inline buttons ────────────────────────────────────────────
 	b.Handle(&btnStatus, h.onBtnStatus)
 	b.Handle(&btnProfile, h.onBtnProfile)
-	b.Handle(&btnAddBot, h.onBtnAddBot)
 	b.Handle(&btnMyGroups, h.onBtnMyGroups)
 	b.Handle(&btnHelp, h.onBtnHelp)
 	b.Handle(&btnBack, h.onBack)
@@ -97,7 +96,6 @@ func (h *Handler) RegisterAll(b *tele.Bot) {
 var (
 	btnStatus   = tele.Btn{Unique: "btn_status"}
 	btnProfile  = tele.Btn{Unique: "btn_profile"}
-	btnAddBot   = tele.Btn{Unique: "btn_addbot"}
 	btnMyGroups = tele.Btn{Unique: "btn_mygroups"}
 	btnHelp     = tele.Btn{Unique: "btn_help"}
 	btnBack     = tele.Btn{Unique: "btn_back"}
@@ -115,14 +113,6 @@ var (
 	btnToggleProfanity = tele.Btn{Unique: "btn_toggle_profanity"}
 	btnToggleWelcome   = tele.Btn{Unique: "btn_toggle_welcome"}
 	btnSettingsBack    = tele.Btn{Unique: "btn_settings_back"}
-)
-
-// ─── Keyboard Definitions ──────────────────────────────────────────────────────
-
-var (
-	// Persistent bottom menu for private chat
-	replyMenu = &tele.ReplyMarkup{ResizeKeyboard: true}
-	btnHome   = replyMenu.Text("🏠 Main Menu")
 )
 
 // ─── /start ──────────────────────────────────────────────────────────────────
@@ -224,14 +214,14 @@ func (h *Handler) onHelp(c tele.Context) error {
 	}
 	text := "📖 *NexusGuard User Guide*\n\n" +
 		"*🔐 Permission Management (in group):*\n" +
-		"• `/addadmin` — Grant bot admin role (Owner only)\n" +
-		"• `/addmod` — Grant moderator role (Admin+)\n" +
-		"• `/removeadmin` — Revoke permissions (Owner only)\n" +
+		"• `/addadmin` (reply to user) — Grant bot admin role (Owner only)\n" +
+		"• `/addmod` (reply to user) — Grant moderator role (Admin+)\n" +
+		"• `/removeadmin` (reply to user) — Revoke permissions (Owner only)\n" +
 		"• `/admins` — List bot administrators\n\n" +
-		"*⚠️ Moderation Commands (in group or private):*\n" +
-		"• `/warn` — Issue warning (reply to user)\n" +
-		"• `/unmute` — Lift mute instantly (reply to user)\n" +
-		"• `/unban` — Lift ban instantly (reply to user)\n\n" +
+		"*⚠️ Moderation Commands (in group):*\n" +
+		"• `/warn` (reply to user) — Issue warning\n" +
+		"• `/unmute` (reply to user) — Lift mute instantly\n" +
+		"• `/unban` (reply to user) — Lift ban instantly\n\n" +
 		"*📋 Lists & Analytics:*\n" +
 		"• `/warned` — List warned users\n" +
 		"• `/muted` — List muted users\n" +
@@ -240,7 +230,11 @@ func (h *Handler) onHelp(c tele.Context) error {
 		"*⚙️ Group Settings:*\n" +
 		"Security settings are managed in private chat under *My Groups*.\n\n" +
 		"_Help messages auto-delete in 20s_ 🧹"
-	return c.Send(text, tele.ModeMarkdown)
+	msg, err := c.Bot().Send(c.Sender(), text, tele.ModeMarkdown)
+	if err == nil && msg != nil {
+		h.autoDeleteAfter(c.Bot(), msg, 20*time.Second)
+	}
+	return err
 }
 
 // ─── Private button callbacks ────────────────────────────────────────────────
@@ -274,27 +268,6 @@ func (h *Handler) onBtnProfile(c tele.Context) error {
 		user.FirstName, user.LastName, uname, user.ID,
 	)
 	return c.Edit(text, backMenu(), tele.ModeMarkdown)
-}
-
-func (h *Handler) onBtnAddBot(c tele.Context) error {
-	if !h.requirePrivateAuth(c) {
-		return answerUnauthorizedCallback(c)
-	}
-	botUsername := c.Bot().Me.Username
-	addURL := fmt.Sprintf("https://t.me/%s?startgroup=true", botUsername)
-	text := "➕ *Add NexusGuard to Your Group*\n\n" +
-		"1. Click the button below.\n" +
-		"2. Select your group.\n" +
-		"3. Grant the following admin permissions:\n" +
-		"   • Delete Messages\n" +
-		"   • Restrict Members\n" +
-		"   • Ban Users"
-	menu := &tele.ReplyMarkup{}
-	menu.Inline(
-		menu.Row(menu.URL("➕ Select Group", addURL)),
-		menu.Row(menu.Data("🔙 Back", btnBack.Unique)),
-	)
-	return c.Edit(text, menu, tele.ModeMarkdown)
 }
 
 func (h *Handler) onBtnMyGroups(c tele.Context) error {
@@ -470,9 +443,9 @@ func (h *Handler) onMyChatMember(c tele.Context) error {
 		privateText := fmt.Sprintf(
 			"✅ *NexusGuard added to \"%s\"!*\n\n"+
 				"👑 You have been registered as *Owner*.\n\n"+
-				"*Commands:*\n"+
-				"• `/addadmin @user` — Bot Admin\n"+
-				"• `/addmod @user` — Moderator\n"+
+				"*Commands (reply to user):*\n"+
+				"• `/addadmin` — Bot Admin\n"+
+				"• `/addmod` — Moderator\n"+
 				"• `/settings` — Settings\n"+
 				"• `/admins` — Admin list%s",
 			chat.Title, adminNote,
@@ -564,17 +537,8 @@ func (h *Handler) onUserLeft(c tele.Context) error {
 
 // ─── onText — Handle text messages ───────────────────────────────────────────
 func (h *Handler) onText(c tele.Context) error {
-	// ── Private Chat Text ──────────────────────────────────────────
+	// ── Private Chat Text: not used anymore ────────────────────────────
 	if c.Chat().Type == tele.ChatPrivate {
-		if c.Message().Text == btnHome.Text {
-			_ = c.Bot().Delete(c.Message())
-			name := c.Sender().FirstName
-			if name == "" {
-				name = c.Sender().Username
-			}
-			text := fmt.Sprintf("🛡️ *Welcome to NexusGuard, %s!*\n\nSelect an option from the menu below:", name)
-			return c.Send(text, mainMenu(c.Bot().Me.Username), tele.ModeMarkdown)
-		}
 		return nil
 	}
 

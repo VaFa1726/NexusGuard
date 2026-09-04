@@ -330,7 +330,6 @@ func (h *Handler) onUnmute(c tele.Context) error {
 	})
 	// Clear DB flags
 	_ = h.svc.UnmuteUser(ctx, group.ID, target.ID)
-	_ = h.svc.SetMuteStatus(ctx, group.ID, target.ID, false, nil)
 
 	msg, _ := c.Bot().Send(c.Chat(),
 		fmt.Sprintf("🔊 *%s* has been unmuted.", targetName), tele.ModeMarkdown)
@@ -376,7 +375,6 @@ func (h *Handler) onUnban(c tele.Context) error {
 	_ = c.Bot().Unban(chat, target)
 	// Clear DB flags
 	_ = h.svc.UnbanUser(ctx, group.ID, target.ID)
-	_ = h.svc.SetBanStatus(ctx, group.ID, target.ID, false)
 
 	msg, _ := c.Bot().Send(c.Chat(),
 		fmt.Sprintf("🔓 *%s* has been unbanned.", targetName), tele.ModeMarkdown)
@@ -404,7 +402,7 @@ func (h *Handler) onCallbackUnban(c tele.Context) error {
 	}
 
 	role := h.checkBotRole(ctx, group.ID, c.Sender().ID)
-	if group.OwnerID != c.Sender().ID && !postgres.HasMinRole(role, postgres.RoleModerator) {
+	if group.OwnerID != c.Sender().ID && !postgres.HasMinRole(role, postgres.RoleAdmin) {
 		return c.Respond(&tele.CallbackResponse{Text: "🚫 Permission denied"})
 	}
 
@@ -412,7 +410,6 @@ func (h *Handler) onCallbackUnban(c tele.Context) error {
 	chat := &tele.Chat{ID: groupTelegramID}
 	_ = c.Bot().Unban(chat, targetUser)
 	_ = h.svc.UnbanUser(ctx, group.ID, targetID)
-	_ = h.svc.SetBanStatus(ctx, group.ID, targetID, false)
 
 	return c.Respond(&tele.CallbackResponse{Text: "✅ User has been unbanned"})
 }
@@ -433,7 +430,7 @@ func (h *Handler) onCallbackUnmute(c tele.Context) error {
 	}
 
 	role := h.checkBotRole(ctx, group.ID, c.Sender().ID)
-	if group.OwnerID != c.Sender().ID && !postgres.HasMinRole(role, postgres.RoleModerator) {
+	if group.OwnerID != c.Sender().ID && !postgres.HasMinRole(role, postgres.RoleAdmin) {
 		return c.Respond(&tele.CallbackResponse{Text: "🚫 Permission denied"})
 	}
 
@@ -444,7 +441,6 @@ func (h *Handler) onCallbackUnmute(c tele.Context) error {
 		Rights: tele.NoRestrictions(),
 	})
 	_ = h.svc.UnmuteUser(ctx, group.ID, targetID)
-	_ = h.svc.SetMuteStatus(ctx, group.ID, targetID, false, nil)
 
 	return c.Respond(&tele.CallbackResponse{Text: "✅ User has been unmuted"})
 }

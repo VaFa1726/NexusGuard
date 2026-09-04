@@ -59,15 +59,3 @@ type WarnLog struct {
 	Reason    string    `db:"reason"`
 	CreatedAt time.Time `db:"created_at"`
 }
-
-// ActionLog stores moderation actions.
-type ActionLog struct {
-	ID        int64      `db:"id"`
-	GroupID   int64      `db:"group_id"`
-	UserID    int64      `db:"user_id"`
-	AdminID   int64      `db:"admin_id"`
-	Action    string     `db:"action"` // "warn", "mute", "ban", "kick", "delete"
-	Reason    string     `db:"reason"`
-	ExpiresAt *time.Time `db:"expires_at"`
-	CreatedAt time.Time  `db:"created_at"`
-}
