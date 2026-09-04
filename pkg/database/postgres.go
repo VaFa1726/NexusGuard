@@ -16,12 +16,18 @@ func Connect(dsn string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("failed to parse database config: %w", err)
 	}
 
-	// Connection pool tuning
-	cfg.MaxConns = 10
-	cfg.MinConns = 2
+	// Connection pool tuning - optimized for high concurrency (1000+ users)
+	cfg.MaxConns = 100         // Increased from 10 for better concurrency
+	cfg.MinConns = 20          // Increased from 2 to maintain ready connections
 	cfg.MaxConnLifetime = 1 * time.Hour
-	cfg.MaxConnIdleTime = 30 * time.Minute
+	cfg.MaxConnIdleTime = 5 * time.Minute // Reduced from 30m to recycle faster
 	cfg.HealthCheckPeriod = 1 * time.Minute
+	
+	// Additional pool settings for performance
+	cfg.ConnConfig.ConnectTimeout = 10 * time.Second
+	cfg.ConnConfig.RuntimeParams = map[string]string{
+		"statement_timeout": "30000", // 30 seconds max query time
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

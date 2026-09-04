@@ -76,18 +76,6 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_warn_logs_group_user ON warn_logs(group_id, user_id)`,
 
-		`CREATE TABLE IF NOT EXISTS action_logs (
-			id         BIGSERIAL PRIMARY KEY,
-			group_id   BIGINT      NOT NULL REFERENCES groups(id),
-			user_id    BIGINT      NOT NULL,
-			admin_id   BIGINT      NOT NULL,
-			action     TEXT        NOT NULL,
-			reason     TEXT        NOT NULL DEFAULT '',
-			expires_at TIMESTAMPTZ,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_action_logs_group_id ON action_logs(group_id)`,
-
 		`CREATE TABLE IF NOT EXISTS group_bot_admins (
 			id          BIGSERIAL PRIMARY KEY,
 			group_id    BIGINT      NOT NULL REFERENCES groups(id),

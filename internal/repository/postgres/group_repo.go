@@ -92,6 +92,7 @@ func (r *GroupRepository) ListByOwner(ctx context.Context, ownerTelegramID int64
 }
 
 // ListManagedGroups returns all groups where the user is either the owner or has a bot admin role.
+// Limited to 100 groups for performance.
 func (r *GroupRepository) ListManagedGroups(ctx context.Context, telegramID int64) ([]domain.Group, error) {
 	query := `SELECT DISTINCT g.id, g.telegram_id, g.title, g.username, g.owner_id, g.is_active,
 	           g.filter_links, g.filter_profanity, g.welcome_enabled, g.welcome_message,
@@ -99,7 +100,8 @@ func (r *GroupRepository) ListManagedGroups(ctx context.Context, telegramID int6
 	          FROM groups g
 	          LEFT JOIN group_bot_admins gba ON gba.group_id = g.id
 	          WHERE g.owner_id = $1 OR gba.telegram_id = $1
-	          ORDER BY g.created_at DESC`
+	          ORDER BY g.created_at DESC
+	          LIMIT 100`
 	rows, err := r.pool.Query(ctx, query, telegramID)
 	if err != nil {
 		return nil, err
