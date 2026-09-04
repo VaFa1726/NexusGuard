@@ -531,9 +531,7 @@ func (h *Handler) onWarn(c tele.Context) error {
 	group, err := h.svc.GetGroup(ctx, c.Chat().ID)
 	if err != nil {
 		deleteCommandMsg(c)
-		msg, _ := c.Bot().Send(c.Chat(), "❌ Group not registered.")
-		if msg != nil { autoDeleteAfter(c.Bot(), msg, 8*time.Second) }
-		return nil
+		return nil // Group not registered — silent
 	}
 
 	// Check permission — Moderator or above (also deletes the command msg)
@@ -641,6 +639,19 @@ func buildWarnProgressBar(count, max int) string {
 func (h *Handler) onSettings(c tele.Context) error {
 	if c.Chat().Type != tele.ChatPrivate {
 		deleteCommandMsg(c)
+
+		// In group: only Moderator+ gets the PM link, everyone else is silently ignored
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		group, err := h.svc.GetGroup(ctx, c.Chat().ID)
+		if err != nil {
+			return nil // Group not registered — silent
+		}
+		if !h.requireGroupRole(c, group.ID, postgres.RoleModerator) {
+			return nil // Unauthorized — silent (requireGroupRole already deleted the msg)
+		}
+
 		botUsername := c.Bot().Me.Username
 		pvURL := fmt.Sprintf("https://t.me/%s?start=groups", botUsername)
 		menu := &tele.ReplyMarkup{}
@@ -659,6 +670,7 @@ func (h *Handler) onSettings(c tele.Context) error {
 	}
 	return h.showMyGroups(c)
 }
+
 
 func settingsText(g *domain.Group) string {
 	on := func(b bool) string {
