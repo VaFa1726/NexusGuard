@@ -304,7 +304,7 @@ func (h *Handler) onUnmute(c tele.Context) error {
 	if err != nil {
 		return nil
 	}
-	if !h.requireGroupRole(c, group.ID, postgres.RoleModerator) {
+	if !h.requireGroupRole(c, group.ID, postgres.RoleAdmin) {
 		return nil
 	}
 
@@ -352,7 +352,7 @@ func (h *Handler) onUnban(c tele.Context) error {
 	if err != nil {
 		return nil
 	}
-	if !h.requireGroupRole(c, group.ID, postgres.RoleModerator) {
+	if !h.requireGroupRole(c, group.ID, postgres.RoleAdmin) {
 		return nil
 	}
 

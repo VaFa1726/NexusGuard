@@ -534,8 +534,8 @@ func (h *Handler) onWarn(c tele.Context) error {
 		return nil // Group not registered — silent
 	}
 
-	// Check permission — Moderator or above (also deletes the command msg)
-	if !h.requireGroupRole(c, group.ID, postgres.RoleModerator) {
+	// Check permission — Admin or above (also deletes the command msg)
+	if !h.requireGroupRole(c, group.ID, postgres.RoleAdmin) {
 		return nil // Silent for unauthorized users
 	}
 
