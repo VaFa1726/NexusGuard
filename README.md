@@ -1,65 +1,21 @@
 # NexusGuard 🛡️
-
-NexusGuard is a robust Telegram bot built with **Go** using the Clean Architecture pattern. It utilizes PostgreSQL for database operations and supports graceful shutdown and proxy configuration.
+A high-performance Telegram Bot written in Go, designed for administration or guarding communities.
 
 ## Features
+- **Telegram Bot API**: Uses `telebot.v3` for fast and reliable bot interactions.
+- **PostgreSQL Database**: Uses `pgx/v5` driver for high-performance database queries and pooling.
+- **Dockerized**: Fully containerized setup with `Dockerfile` and `docker-compose.yml` for easy deployment.
+- **Make Automation**: Includes a `Makefile` for streamlined building and testing.
 
-- **Clean Architecture:** Organized structure (`cmd`, `internal`, `pkg`) for maintainability.
-- **PostgreSQL:** Reliable database integration using `database/sql`.
-- **Proxy Support:** Ready for restricted network environments.
-- **Dockerized:** Simple deployment using `docker-compose`.
-- **Graceful Shutdown:** Safe handling of OS signals to gracefully stop operations.
+## Tech Stack
+- **Language**: Go 1.25+
+- **Database**: PostgreSQL
+- **Libraries**: `telebot.v3`, `pgx/v5`
 
-## Prerequisites
-
-- [Go](https://golang.org/doc/install) (1.25 or later)
-- [Docker & Docker Compose](https://docs.docker.com/get-docker/)
-
-## Quick Start
-
-1. **Clone the repository:**
+## Getting Started
+1. Clone the repo.
+2. Copy `.env.example` to `.env` and configure your Bot Token and DB credentials.
+3. Run with Docker:
    ```bash
-   git clone https://github.com/VaFa1726/NexusGuard.git
-   cd NexusGuard
+   docker-compose up -d
    ```
-
-2. **Configuration:**
-   Copy the example environment file and add your configuration details.
-   ```bash
-   cp .env.example .env
-   ```
-   *Edit `.env` and add your `TELEGRAM_TOKEN`.*
-
-3. **Start the Database:**
-   ```bash
-   make docker-up
-   # Or manually: docker compose up -d postgres
-   ```
-
-4. **Run the Bot:**
-   ```bash
-   make run
-   ```
-
-## Project Structure
-
-```
-├── cmd/bot           # Application entry point
-├── internal/         # Private application and library code (Clean Architecture)
-│   ├── delivery      # HTTP/Bot handlers
-│   ├── usecase       # Business logic
-│   ├── repository    # Database/API access
-│   └── domain        # Business domain models
-├── pkg/              # Public library code (Logger, Database, Config)
-├── Dockerfile        # Docker setup for the bot
-├── docker-compose.yml# Multi-container orchestration
-└── Makefile          # Useful commands for development
-```
-
-## Contributing
-
-Contributions are welcome! Feel free to open an issue or submit a pull request.
-
-## License
-
-MIT License
