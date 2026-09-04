@@ -17,6 +17,7 @@ import (
 	"github.com/nexusguard/bot/internal/usecase"
 	"github.com/nexusguard/bot/pkg/config"
 	"github.com/nexusguard/bot/pkg/database"
+	"github.com/nexusguard/bot/pkg/health"
 	"github.com/nexusguard/bot/pkg/logger"
 
 	goProxy "golang.org/x/net/proxy"
@@ -51,6 +52,10 @@ func main() {
 		os.Exit(1)
 	}
 	cancel()
+
+	// ── Start Health Check Server ────────────────────────────────────────────
+	healthHandler := health.NewHandler(pool)
+	healthHandler.Start("8080")
 
 	// ── HTTP Client with Proxy ────────────────────────────────────────────────
 	httpClient, err := buildHTTPClient(cfg.ProxyURL)
@@ -100,6 +105,14 @@ func main() {
 
 	handler := telegram.NewHandler(groupSvc, adminSvc, adminRepo)
 
+	// ── Start Cleanup Service ────────────────────────────────────────────────
+	cleanupSvc := postgres.NewCleanupService(pool)
+	cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
+	defer cleanupCancel()
+	
+	// Run cleanup every 24 hours
+	go cleanupSvc.StartPeriodicCleanup(cleanupCtx, 24*time.Hour)
+
 	// ── Register Handlers ─────────────────────────────────────────────────────
 	handler.RegisterAll(bot)
 
@@ -115,6 +128,10 @@ func main() {
 	<-shutdownCtx.Done()
 	slog.Info("Shutdown signal received, stopping bot...")
 	bot.Stop()
+	
+	// Gracefully shutdown XP workers
+	groupSvc.Shutdown()
+	
 	slog.Info("NexusGuard stopped gracefully. Goodbye! 👋")
 }
 
