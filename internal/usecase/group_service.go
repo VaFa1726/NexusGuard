@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"sync"
 	"time"
 
 	"github.com/nexusguard/bot/internal/domain"
@@ -14,9 +15,18 @@ import (
 // linkRegex matches URLs, telegram links, and link shorteners.
 var linkRegex = regexp.MustCompile(`(?i)(https?://[^\s]+|t\.me/[^\s]+|telegram\.me/[^\s]+|bit\.ly/[^\s]+|tinyurl\.com/[^\s]+|www\.[^\s]+)`)
 
+// profanityRegex matches common profanity and offensive words (basic filter).
+// Note: This is a basic implementation. For production, consider using a comprehensive profanity library.
+var profanityRegex = regexp.MustCompile(`(?i)(fuck|shit|bitch|asshole|damn|crap|bastard|dick|pussy|cock|کیر|کس|جنده|گاو|خر|احمق|کونی)`)
+
 type xpEvent struct {
 	groupID int64
 	userID  int64
+}
+
+type xpBatch struct {
+	events []xpEvent
+	mu     sync.Mutex
 }
 
 // GroupService contains the core business logic for group moderation.
@@ -24,30 +34,88 @@ type GroupService struct {
 	groupRepo *postgres.GroupRepository
 	userRepo  *postgres.UserRepository
 	xpQueue   chan xpEvent
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
 }
 
 func NewGroupService(gr *postgres.GroupRepository, ur *postgres.UserRepository) *GroupService {
+	ctx, cancel := context.WithCancel(context.Background())
 	s := &GroupService{
 		groupRepo: gr,
 		userRepo:  ur,
-		xpQueue:   make(chan xpEvent, 500),
+		xpQueue:   make(chan xpEvent, 5000), // Increased from 500
+		ctx:       ctx,
+		cancel:    cancel,
 	}
-	// Start background worker for XP updates to prevent DB saturation
-	go s.startXPWorker()
+	// Start 10 background workers for XP updates to prevent DB saturation
+	for i := 0; i < 10; i++ {
+		s.wg.Add(1)
+		go s.xpWorkerPool(i)
+	}
+	slog.Info("XP worker pool started", "workers", 10, "queue_size", 5000)
 	return s
 }
 
-func (s *GroupService) startXPWorker() {
-	for ev := range s.xpQueue {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		user := &domain.User{TelegramID: ev.userID}
-		if err := s.userRepo.Upsert(ctx, user); err == nil {
-			if member, err := s.userRepo.UpsertMember(ctx, ev.groupID, user.ID); err == nil {
-				_ = s.userRepo.AddXP(ctx, member.ID, 1)
+// xpWorkerPool processes XP events in batches for better performance
+func (s *GroupService) xpWorkerPool(workerID int) {
+	defer s.wg.Done()
+	
+	batch := make(map[string]*xpEvent) // key: "groupID:userID"
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	
+	flushBatch := func() {
+		if len(batch) == 0 {
+			return
+		}
+		
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		
+		// Process batch
+		for _, ev := range batch {
+			user := &domain.User{TelegramID: ev.userID}
+			if err := s.userRepo.Upsert(ctx, user); err == nil {
+				if member, err := s.userRepo.UpsertMember(ctx, ev.groupID, user.ID); err == nil {
+					_ = s.userRepo.AddXP(ctx, member.ID, 1)
+				}
 			}
 		}
-		cancel()
+		
+		slog.Debug("XP batch processed", "worker", workerID, "count", len(batch))
+		batch = make(map[string]*xpEvent)
 	}
+	
+	for {
+		select {
+		case ev := <-s.xpQueue:
+			key := fmt.Sprintf("%d:%d", ev.groupID, ev.userID)
+			batch[key] = &ev
+			
+			// Flush if batch is large enough
+			if len(batch) >= 100 {
+				flushBatch()
+			}
+			
+		case <-ticker.C:
+			flushBatch()
+			
+		case <-s.ctx.Done():
+			flushBatch() // Final flush
+			slog.Info("XP worker stopped", "worker", workerID)
+			return
+		}
+	}
+}
+
+// Shutdown gracefully stops all XP workers
+func (s *GroupService) Shutdown() {
+	slog.Info("Shutting down XP workers...")
+	s.cancel()
+	s.wg.Wait()
+	close(s.xpQueue)
+	slog.Info("XP workers stopped gracefully")
 }
 
 // RegisterGroup upserts a group when the bot is added to it.
@@ -90,6 +158,9 @@ func (s *GroupService) SetGroupActive(ctx context.Context, groupDBID int64, acti
 func (s *GroupService) ShouldFilterMessage(ctx context.Context, group *domain.Group, text string) (bool, string) {
 	if group.FilterLinks && linkRegex.MatchString(text) {
 		return true, "Unauthorized link"
+	}
+	if group.FilterProfanity && profanityRegex.MatchString(text) {
+		return true, "Inappropriate language"
 	}
 	return false, ""
 }
@@ -140,12 +211,17 @@ func (s *GroupService) RegisterUser(ctx context.Context, u *domain.User) error {
 	return s.userRepo.Upsert(ctx, u)
 }
 
-// AddXPForMessage queues an XP increment event non-blockingly.
+// AddXPForMessage queues an XP increment event non-blockingly with metrics.
 func (s *GroupService) AddXPForMessage(ctx context.Context, group *domain.Group, telegramUserID int64) {
 	select {
 	case s.xpQueue <- xpEvent{groupID: group.ID, userID: telegramUserID}:
+		// Successfully queued
 	default:
-		// Drop XP increment if queue is saturated under high traffic to keep bot fast
+		// Queue full - log warning instead of silent drop
+		slog.Warn("XP queue full - dropping event",
+			"user_id", telegramUserID,
+			"group_id", group.ID,
+			"queue_size", len(s.xpQueue))
 	}
 }
 
